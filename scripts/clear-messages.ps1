@@ -4,6 +4,7 @@ param(
     [string]$RedisHost = "localhost",
     [int]$RedisPort = 6379,
     [switch]$Force,
+    [switch]$ShowKeys,
     [string]$RedisCliPath = $null
 )
 
@@ -11,7 +12,9 @@ if (-not $Quiet) {
     Write-Host "====================================" -ForegroundColor Cyan
     Write-Host "AgentTimeline - Clear Messages" -ForegroundColor Cyan
     Write-Host "====================================" -ForegroundColor Cyan
-    Write-Host "Clearing stored messages from Redis..." -ForegroundColor Yellow
+    Write-Host "Clearing stored message CONTENT from Redis..." -ForegroundColor Yellow
+    Write-Host "Supports both Phase 1 (timeline_message*) and Phase 2 (message*) formats" -ForegroundColor Gray
+    Write-Host "NOTE: Only deletes actual message data, preserves Redis indexes" -ForegroundColor Gray
     Write-Host ""
 }
 
@@ -112,13 +115,45 @@ if (-not $redisCliPath) {
     exit 1
 }
 
-# Get all timeline message keys
-$timelineKeys = @()
+# Get all message keys (supports both Phase 1 and Phase 2 formats)
+$messageKeys = @()
 
 try {
     # Use redis-cli to get all keys matching the pattern
-    $keysOutput = & $redisCliPath -h $RedisHost -p $RedisPort KEYS "timeline_message*"
-    $timelineKeys = $keysOutput | Where-Object { $_ -and $_.Trim() -ne "" }
+    # Try Phase 2 pattern first (message*), then fall back to Phase 1 pattern (timeline_message*)
+    $phase2Keys = & $redisCliPath -h $RedisHost -p $RedisPort KEYS "message*"
+    $phase1Keys = & $redisCliPath -h $RedisHost -p $RedisPort KEYS "timeline_message*"
+
+    $phase2Count = ($phase2Keys | Where-Object { $_ -and $_.Trim() -ne "" }).Count
+    $phase1Count = ($phase1Keys | Where-Object { $_ -and $_.Trim() -ne "" }).Count
+
+    $totalPatternKeys = ($keysOutput | Where-Object { $_ -and $_.Trim() -ne "" }).Count
+
+    if (-not $Quiet) {
+        Write-Host "Phase 2 keys found: $phase2Count" -ForegroundColor White
+        Write-Host "Phase 1 keys found: $phase1Count" -ForegroundColor White
+        Write-Host "Total Redis keys matching patterns: $totalPatternKeys" -ForegroundColor White
+    }
+
+    $keysOutput = $phase2Keys + $phase1Keys
+    # Only delete actual message content keys, not index keys
+    $messageKeys = $keysOutput | Where-Object {
+        $_ -and $_.Trim() -ne "" -and
+        $_ -notmatch ":idx$" -and           # Exclude index keys
+        $_ -notmatch "^message$" -and       # Exclude bare "message" key
+        $_ -notmatch ":sessionId:" -and     # Exclude session index keys
+        $_ -notmatch ":parentMessageId:"    # Exclude parent message index keys
+    } | Select-Object -Unique
+
+    if (-not $Quiet -and $messageKeys.Count -gt 0) {
+        Write-Host "Sample keys found:" -ForegroundColor White
+        $messageKeys | Select-Object -First 5 | ForEach-Object {
+            Write-Host "  - $_" -ForegroundColor Gray
+        }
+        if ($messageKeys.Count -gt 5) {
+            Write-Host "  ... and $($messageKeys.Count - 5) more" -ForegroundColor Gray
+        }
+    }
 } catch {
     if (-not $Quiet) {
         Write-Host "[ERROR] Failed to query Redis keys" -ForegroundColor Red
@@ -127,19 +162,36 @@ try {
         Write-Host "Troubleshooting:" -ForegroundColor Yellow
         Write-Host "  - Make sure Redis server is running on $RedisHost`:$RedisPort" -ForegroundColor White
         Write-Host "  - Check if redis-cli.exe is working: & $redisCliPath ping" -ForegroundColor White
+        Write-Host ""
+        Write-Host "What this script does:" -ForegroundColor Cyan
+        Write-Host "  - Finds all Redis keys matching message patterns" -ForegroundColor White
+        Write-Host "  - Filters out index/metadata keys (preserves them)" -ForegroundColor White
+        Write-Host "  - Only deletes actual message content keys" -ForegroundColor White
     } else {
         Write-Host "[ERROR] Redis query failed" -ForegroundColor Red
     }
     exit 1
 }
 
-$messageCount = $timelineKeys.Count
+$messageCount = $messageKeys.Count
 
 if (-not $Quiet) {
     Write-Host "Found $messageCount message(s) in Redis" -ForegroundColor White
 
     if ($messageCount -eq 0) {
         Write-Host "[INFO] No messages to clear" -ForegroundColor Gray
+        exit 0
+    }
+
+    if ($ShowKeys) {
+        Write-Host ""
+        Write-Host "Detailed key analysis:" -ForegroundColor Cyan
+        Write-Host "====================" -ForegroundColor Cyan
+        $messageKeys | ForEach-Object {
+            Write-Host "  $_" -ForegroundColor Gray
+        }
+        Write-Host ""
+        Write-Host "[INFO] Use -Force to actually delete these keys" -ForegroundColor Yellow
         exit 0
     }
 
@@ -160,7 +212,7 @@ if (-not $Quiet) {
 $deletedCount = 0
 $errors = @()
 
-foreach ($key in $timelineKeys) {
+foreach ($key in $messageKeys) {
     try {
         $result = & $redisCliPath -h $RedisHost -p $RedisPort DEL $key
         if ($result -eq "1") {

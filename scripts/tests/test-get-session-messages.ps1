@@ -42,11 +42,15 @@ try {
         if (-not $Quiet -and $messages.Count -gt 0) {
             Write-Host "Session messages:" -ForegroundColor Cyan
             $messages | Select-Object -First 3 | ForEach-Object {
-                Write-Host "  ID: $($_.id)" -ForegroundColor White
-                Write-Host "  User: $($_.userMessage)" -ForegroundColor White
-                Write-Host "  AI: $($_.assistantResponse)" -ForegroundColor White
-                Write-Host "  Model: $($_.modelUsed)" -ForegroundColor White
-                Write-Host "  Time: $($_.timestamp)" -ForegroundColor White
+                $roleIcon = if ($_.role -eq "USER") { "👤" } else { "🤖" }
+                $roleColor = if ($_.role -eq "USER") { "Cyan" } else { "Magenta" }
+                Write-Host "  $roleIcon $($_.role): $($_.content)" -ForegroundColor $roleColor
+                Write-Host "    ID: $($_.id)" -ForegroundColor White
+                Write-Host "    Parent: $($_.parentMessageId)" -ForegroundColor White
+                Write-Host "    Time: $($_.timestamp)" -ForegroundColor White
+                if ($_.metadata -and $_.metadata.model) {
+                    Write-Host "    Model: $($_.metadata.model)" -ForegroundColor White
+                }
                 Write-Host ""
             }
 

@@ -1,6 +1,7 @@
 package com.agenttimeline.controller;
 
-import com.agenttimeline.model.TimelineMessage;
+import com.agenttimeline.model.Message;
+import com.agenttimeline.service.MessageChainValidator;
 import com.agenttimeline.service.TimelineService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,8 +20,12 @@ public class TimelineController {
 
     private final TimelineService timelineService;
 
+    /**
+     * Chat endpoint with message chaining
+     * Stores user message and assistant response separately with proper parent-child relationships
+     */
     @PostMapping("/chat")
-    public Mono<ResponseEntity<TimelineMessage>> chat(
+    public Mono<ResponseEntity<Message>> chat(
             @RequestBody Map<String, String> request,
             @RequestParam(defaultValue = "default") String sessionId) {
 
@@ -29,7 +34,7 @@ public class TimelineController {
             return Mono.just(ResponseEntity.badRequest().build());
         }
 
-        log.info("Processing chat request for session: {}", sessionId);
+        log.info("Processing chat request for session: {} with message chaining", sessionId);
 
         return timelineService.processUserMessage(userMessage, sessionId)
                 .map(message -> ResponseEntity.ok(message))
@@ -37,10 +42,30 @@ public class TimelineController {
                 .onErrorResume(error -> Mono.just(ResponseEntity.internalServerError().build()));
     }
 
-    @GetMapping("/session/{sessionId}")
-    public ResponseEntity<List<TimelineMessage>> getSessionMessages(@PathVariable String sessionId) {
+    /**
+     * Get conversation history by reconstructing message chains
+     * This endpoint uses the new message chaining logic for efficient conversation reconstruction
+     */
+    @GetMapping("/conversation/{sessionId}")
+    public ResponseEntity<List<Message>> getConversationHistory(@PathVariable String sessionId) {
         try {
-            List<TimelineMessage> messages = timelineService.getSessionMessages(sessionId);
+            List<Message> conversation = timelineService.getConversationHistory(sessionId);
+            log.info("Retrieved conversation history for session: {} with {} messages",
+                sessionId, conversation.size());
+            return ResponseEntity.ok(conversation);
+        } catch (Exception e) {
+            log.error("Error retrieving conversation history for session: {}", sessionId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Get all messages for a session (sorted by timestamp, for backward compatibility)
+     */
+    @GetMapping("/session/{sessionId}")
+    public ResponseEntity<List<Message>> getSessionMessages(@PathVariable String sessionId) {
+        try {
+            List<Message> messages = timelineService.getSessionMessages(sessionId);
             return ResponseEntity.ok(messages);
         } catch (Exception e) {
             log.error("Error retrieving session messages", e);
@@ -48,10 +73,13 @@ public class TimelineController {
         }
     }
 
+    /**
+     * Get all messages across all sessions
+     */
     @GetMapping("/messages")
-    public ResponseEntity<List<TimelineMessage>> getAllMessages() {
+    public ResponseEntity<List<Message>> getAllMessages() {
         try {
-            List<TimelineMessage> messages = timelineService.getAllMessages();
+            List<Message> messages = timelineService.getAllMessages();
             return ResponseEntity.ok(messages);
         } catch (Exception e) {
             log.error("Error retrieving all messages", e);
@@ -59,11 +87,58 @@ public class TimelineController {
         }
     }
 
+    /**
+     * Validate message chain for a session
+     */
+    @GetMapping("/chain/validate/{sessionId}")
+    public ResponseEntity<MessageChainValidator.ChainValidationResult> validateChain(@PathVariable String sessionId) {
+        try {
+            MessageChainValidator.ChainValidationResult result = timelineService.validateMessageChain(sessionId);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error validating chain for session: {}", sessionId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Repair broken message chains for a session
+     */
+    @PostMapping("/chain/repair/{sessionId}")
+    public ResponseEntity<MessageChainValidator.ChainRepairResult> repairChain(@PathVariable String sessionId) {
+        try {
+            MessageChainValidator.ChainRepairResult result = timelineService.repairMessageChain(sessionId);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error repairing chain for session: {}", sessionId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Get chain validation statistics across all sessions
+     */
+    @GetMapping("/chain/statistics")
+    public ResponseEntity<Map<String, Object>> getChainStatistics() {
+        try {
+            Map<String, Object> stats = timelineService.getChainValidationStatistics();
+            return ResponseEntity.ok(stats);
+        } catch (Exception e) {
+            log.error("Error retrieving chain statistics", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Health check endpoint
+     */
     @GetMapping("/health")
     public ResponseEntity<Map<String, String>> healthCheck() {
         return ResponseEntity.ok(Map.of(
             "status", "UP",
             "service", "AgentTimeline API",
+            "phase", "2",
+            "features", "Message chaining, Conversation reconstruction, Chain validation",
             "timestamp", java.time.LocalDateTime.now().toString()
         ));
     }

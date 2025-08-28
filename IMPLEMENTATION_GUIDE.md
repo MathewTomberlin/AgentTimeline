@@ -25,85 +25,47 @@ Phase 1 has been successfully implemented with the following core components:
 - [x] Data persistence verified in Redis
 - [x] IMPLEMENTATION_STATUS.md updated
 
-## Phase 2: Enhanced Message Storage and Retrieval
+## Phase 2: Enhanced Message Storage and Retrieval - COMPLETED ✅
 
-### Overview
-Implement separate storage and retrieval of user messages and assistant responses using a unified message model with role-based differentiation. This will provide better data organization and enable more flexible conversation management through message chaining.
+### Phase 2 Completed Checklist
 
-### Requirements
+- [x] New `Message` model created with role field and `parentMessageId` for chaining
+- [x] `MessageRepository` implemented with role-based queries and chain traversal methods
+- [x] `TimelineService` updated for separate message storage with message chaining logic
+- [x] Chat endpoint modified to store user/assistant messages separately with proper chaining
+- [x] Conversation history endpoint added using message chain traversal
+- [x] Message chain validation and error handling implemented
+- [x] Conversation reconstruction tested (follows message chains correctly)
+- [x] Data migration strategy implemented (if needed)
+- [x] Documentation updated with message chaining details
 
-#### 1. Update Data Model
-- Create a new `Message` entity to replace the current combined `TimelineMessage`
-- Include fields: `id`, `sessionId`, `role` (USER/ASSISTANT), `content`, `timestamp`, `metadata`
-- **Add message chaining fields**: `parentMessageId` (references the previous message in conversation)
-- The `role` field will distinguish between user messages and assistant responses
-- **Message Chain Logic**: Each message (except the first) should reference its parent message, creating a linked list structure for efficient conversation reconstruction
+### Phase 2 Implementation Summary
 
-#### 2. Database Schema Updates
-- Modify Redis storage structure to accommodate separate messages
-- Update repository methods to handle role-based queries
-- Ensure backward compatibility with existing data if needed
+Phase 2 has been successfully implemented with the following enhanced features:
 
-#### 3. Service Layer Updates
-- Update `TimelineService` to save user and assistant messages separately
-- **Implement message chaining logic**: When saving a new message, set its `parentMessageId` to reference the previous message in the conversation
-- Implement methods to retrieve conversation threads by session using message chain traversal
-- Add functionality to reconstruct full conversations by following the message chain (no timestamp sorting needed)
-- **Conversation Flow**: User message → Assistant response → User message (with parentMessageId pointing to assistant response) → Assistant response (with parentMessageId pointing to previous user message)
+#### New Components Created
+- **`Message` Model**: Unified message entity with `role` (USER/ASSISTANT), `parentMessageId` for chaining, and metadata support
+- **`MessageRepository`**: Repository with role-based queries and chain traversal capabilities
+- **`MessageChainValidator`**: Comprehensive validation and repair system for message chains
 
-#### 4. API Updates
-- Modify chat endpoint to store user message first, then assistant response with proper message chaining
-- **Message Chain Creation**: When processing a chat request, store user message, get assistant response, then store assistant message with `parentMessageId` pointing to the user message
-- Add endpoint to retrieve conversation history by session using message chain traversal (efficient reconstruction without sorting)
-- Ensure all existing endpoints remain functional during transition
-- **Chain Validation**: Add logic to verify message chain integrity and handle broken chains gracefully
+#### Enhanced Features
+- **Message Chaining**: Each message references its parent, creating a linked list structure for efficient conversation reconstruction
+- **Separate Storage**: User and assistant messages are stored separately with proper role differentiation
+- **Chain Validation**: Automatic validation of message chain integrity with repair capabilities
+- **Conversation Reconstruction**: Efficient reconstruction using message chains instead of timestamp sorting
+- **Error Handling**: Graceful handling of broken chains with automatic repair attempts
 
-### Implementation Steps
+#### New API Endpoints
+- `GET /api/v1/timeline/conversation/{sessionId}` - Get conversation history using message chain traversal
+- `GET /api/v1/timeline/chain/validate/{sessionId}` - Validate message chain integrity
+- `POST /api/v1/timeline/chain/repair/{sessionId}` - Repair broken message chains
+- `GET /api/v1/timeline/chain/statistics` - Get chain validation statistics across all sessions
 
-1. **Create New Message Model**
-   - Design `Message` class with role enumeration (USER/ASSISTANT)
-   - Include fields: `id`, `sessionId`, `role`, `content`, `timestamp`, `parentMessageId`, `metadata`
-   - **Message Chain Structure**: `parentMessageId` should be null for the first message in each conversation
-   - Include metadata for model information, response times, etc.
+#### Backward Compatibility
+- All existing endpoints remain functional during the transition
+- Legacy endpoints use timestamp-based sorting as fallback
+- New endpoints provide enhanced message chaining capabilities
 
-2. **Update Repository Layer**
-   - Create `MessageRepository` with role-based query methods
-   - Add method to find messages by session and reconstruct conversation chain
-   - **Chain Traversal Method**: Implement `findConversationChain(sessionId)` that follows `parentMessageId` references
-   - Implement session-based message retrieval with chain ordering
-
-3. **Update Service Layer**
-   - Modify `TimelineService` to handle separate message storage with chaining
-   - **Message Chain Logic**: When saving messages, set `parentMessageId` to maintain conversation flow
-   - Add conversation reconstruction logic that follows message chains instead of sorting by timestamp
-   - **Chain Management**: Track the last message ID in each session for efficient chaining
-
-4. **Update Controller**
-   - Modify chat endpoint to store user message first, then assistant response with proper chaining
-   - **Chain Creation Flow**: Store user message → Get AI response → Store assistant message with `parentMessageId` pointing to user message
-   - Add conversation history endpoint that uses message chain traversal for efficient reconstruction
-   - **Chain Validation**: Add error handling for broken message chains
-
-5. **Testing and Validation**
-   - Test message storage and retrieval with proper chaining
-   - Verify conversation reconstruction follows the correct message chain
-   - Test edge cases: broken chains, missing parent messages, concurrent conversations
-   - Ensure data integrity and proper chain maintenance during high-load scenarios
-
-### Phase 2 Checklist
-
-- [ ] New `Message` model created with role field and `parentMessageId` for chaining
-- [ ] `MessageRepository` implemented with role-based queries and chain traversal methods
-- [ ] `TimelineService` updated for separate message storage with message chaining logic
-- [ ] Chat endpoint modified to store user/assistant messages separately with proper chaining
-- [ ] Conversation history endpoint added using message chain traversal
-- [ ] Message chain validation and error handling implemented
-- [ ] Conversation reconstruction tested (follows message chains correctly)
-- [ ] Data migration strategy implemented (if needed)
-- [ ] Documentation updated with message chaining details
-
----
-
-**Next**: Begin implementation of Phase 2 by creating the new Message model and updating the storage architecture.
+## Phase 3: Advanced Features
 
 

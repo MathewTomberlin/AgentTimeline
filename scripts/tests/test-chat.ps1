@@ -31,18 +31,25 @@ try {
 
         if (-not $Quiet) {
             Write-Host "[PASSED] Test completed successfully" -ForegroundColor Green
-            Write-Host "ID: $($content.id)" -ForegroundColor White
-            Write-Host "Session: $($content.sessionId)" -ForegroundColor White
-            Write-Host "User Message: $($content.userMessage)" -ForegroundColor White
-            Write-Host "AI Response: $($content.assistantResponse)" -ForegroundColor White
-            Write-Host "Model Used: $($content.modelUsed)" -ForegroundColor White
-            Write-Host "Response Time: $($content.responseTime)ms" -ForegroundColor White
+            Write-Host "🤖 AI Response Details:" -ForegroundColor Green
+            Write-Host "  ID: $($content.id)" -ForegroundColor White
+            Write-Host "  Session: $($content.sessionId)" -ForegroundColor White
+            Write-Host "  Role: $($content.role)" -ForegroundColor White
+            Write-Host "  Content: $($content.content)" -ForegroundColor White
+            Write-Host "  Parent Message: $($content.parentMessageId)" -ForegroundColor White
+            Write-Host "  Timestamp: $($content.timestamp)" -ForegroundColor White
+            if ($content.metadata -and $content.metadata.model) {
+                Write-Host "  Model: $($content.metadata.model)" -ForegroundColor White
+            }
+            if ($content.metadata -and $content.metadata.responseTimeMs) {
+                Write-Host "  Response Time: $($content.metadata.responseTimeMs)ms" -ForegroundColor White
+            }
         } else {
-            Write-Host "[OK] Chat test passed - Response received from $($content.modelUsed)" -ForegroundColor Green
+            Write-Host "[OK] Chat test passed - Response received" -ForegroundColor Green
         }
 
-        # Validate response structure
-        if (-not $content.id -or -not $content.sessionId -or -not $content.userMessage -or -not $content.assistantResponse) {
+        # Validate response structure for new Message format
+        if (-not $content.id -or -not $content.sessionId -or -not $content.role -or -not $content.content) {
             if (-not $Quiet) {
                 Write-Host "[WARNING] Response missing some expected fields" -ForegroundColor Yellow
             }
