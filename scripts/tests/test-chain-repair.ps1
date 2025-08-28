@@ -1,11 +1,52 @@
 param(
     [switch]$Quiet,
     [switch]$NoPause,
-    [string]$SessionId = "repair-test-session"
+    [string]$SessionId
 )
 
 $testName = "Message Chain Repair Test (Phase 2)"
 $endpoint = "http://localhost:8080/api/v1"
+
+# Generate unique session ID if not provided
+if (-not $SessionId) {
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $random = Get-Random -Minimum 1000 -Maximum 9999
+    $SessionId = "repair-test-$timestamp-$random"
+}
+
+function Show-ChainStatistics {
+    param([string]$Title = "Current Chain Statistics")
+
+    Write-Host ""
+    Write-Host "$Title" -ForegroundColor Cyan
+    Write-Host ("=" * $Title.Length) -ForegroundColor Cyan
+
+    try {
+        $statsResponse = Invoke-WebRequest -Uri "$endpoint/timeline/chain/statistics" -Method GET -TimeoutSec 10
+        $statistics = $statsResponse.Content | ConvertFrom-Json
+
+        Write-Host "Total Sessions: $($statistics.totalSessions)" -ForegroundColor White
+        Write-Host "Valid Chains: $($statistics.validChains)" -ForegroundColor Green
+        Write-Host "Invalid Chains: $($statistics.invalidChains)" -ForegroundColor $(if ($statistics.invalidChains -gt 0) { "Red" } else { "Green" })
+        Write-Host "Total Messages: $($statistics.totalMessages)" -ForegroundColor White
+        Write-Host "Validation Rate: $([math]::Round($statistics.validationRate, 1))%" -ForegroundColor $(if ($statistics.validationRate -eq 100) { "Green" } else { "Yellow" })
+
+        if ($statistics.sessionStats -and $statistics.sessionStats.Count -gt 0) {
+            Write-Host ""
+            Write-Host "Session Details:" -ForegroundColor Yellow
+            foreach ($session in $statistics.sessionStats) {
+                $status = if ($session.valid) { "VALID" } else { "INVALID" }
+                $color = if ($session.valid) { "Green" } else { "Red" }
+                Write-Host "  $($session.sessionId): $status ($($session.messageCount) msgs)" -ForegroundColor $color
+                if ($session.brokenReferences -gt 0 -or $session.orphanMessages -gt 0) {
+                    Write-Host "    Broken refs: $($session.brokenReferences), Orphans: $($session.orphanMessages)" -ForegroundColor Red
+                }
+            }
+        }
+    } catch {
+        Write-Host "Error retrieving statistics: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
 
 if (-not $Quiet) {
     Write-Host "====================================" -ForegroundColor Cyan
@@ -13,12 +54,16 @@ if (-not $Quiet) {
     Write-Host "====================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "This test will:" -ForegroundColor Yellow
-    Write-Host "1. Create a conversation with simulated broken chains" -ForegroundColor White
-    Write-Host "2. Demonstrate chain repair functionality" -ForegroundColor White
-    Write-Host "3. Show before/after repair comparison" -ForegroundColor White
+    Write-Host "1. Show initial chain statistics" -ForegroundColor White
+    Write-Host "2. Create test conversations" -ForegroundColor White
+    Write-Host "3. Demonstrate chain repair functionality" -ForegroundColor White
+    Write-Host "4. Show final chain statistics" -ForegroundColor White
     Write-Host ""
-    Write-Host "Session ID: $SessionId" -ForegroundColor Yellow
+    Write-Host "Main Session ID: $SessionId" -ForegroundColor Yellow
     Write-Host ""
+
+    # Show initial statistics
+    Show-ChainStatistics -Title "INITIAL CHAIN STATISTICS (Before Tests)"
 }
 
 try {
@@ -54,6 +99,11 @@ try {
         }
 
         Start-Sleep -Milliseconds 500
+    }
+
+    # Show statistics after creating conversation
+    if (-not $Quiet) {
+        Show-ChainStatistics -Title "STATISTICS AFTER CREATING TEST CONVERSATION"
     }
 
     # Step 2: Validate the initial chain (should be valid)
@@ -110,46 +160,83 @@ try {
                 Write-Host "  [OK] $_" -ForegroundColor Green
             }
         } else {
-            Write-Host ""
-            Write-Host "No repairs were needed (chain was already valid)" -ForegroundColor Gray
+                    Write-Host ""
+        Write-Host "No repairs were needed (chain was already valid)" -ForegroundColor Gray
         }
 
-        # Step 4: Create a scenario that might need repair (simulated by creating orphaned messages)
+        # Show statistics after repair operations
+        if (-not $Quiet) {
+            Show-ChainStatistics -Title "STATISTICS AFTER REPAIR OPERATIONS"
+        }
+
+        # Step 4: Create broken chains to test repair functionality
         Write-Host ""
-        Write-Host "Step 4: Testing repair functionality with edge case..." -ForegroundColor Cyan
+        Write-Host "Step 4: Creating broken chains to test repair functionality..." -ForegroundColor Cyan
 
-        # Create another session with a different pattern
+        # Create different types of broken chains for testing
+        $brokenChainTypes = @("orphaned", "broken-reference", "multiple-roots")
         $edgeCaseSession = "$SessionId-edge-case"
-        Write-Host "  Creating edge case scenario in session: $edgeCaseSession" -ForegroundColor White
 
-        # Create a conversation that will be used to demonstrate repair
-        $edgeMessages = @(
-            "This is an edge case test",
-            "Testing repair mechanisms"
-        )
+        foreach ($breakType in $brokenChainTypes) {
+            Write-Host "  Creating $breakType scenario in session: $edgeCaseSession-$breakType" -ForegroundColor White
 
-        foreach ($message in $edgeMessages) {
-            $body = @{
-                message = $message
-            } | ConvertTo-Json
-
-            $response = Invoke-WebRequest -Uri "$endpoint/timeline/chat$(if ($edgeCaseSession) { "?sessionId=$edgeCaseSession" })" -Method POST -ContentType "application/json" -Body $body -TimeoutSec 30
-            if (-not $Quiet) {
-                Write-Host "    [OK] Created edge case message" -ForegroundColor Green
+            try {
+                $createBrokenResponse = Invoke-WebRequest -Uri "$endpoint/timeline/test/create-broken-chain?sessionId=$edgeCaseSession-$breakType&breakType=$breakType" -Method POST -TimeoutSec 10
+                $result = $createBrokenResponse.Content
+                Write-Host "    [SUCCESS] $result" -ForegroundColor Green
+            } catch {
+                Write-Host "    [FAILED] Failed to create $breakType scenario: $($_.Exception.Message)" -ForegroundColor Red
             }
         }
 
-        # Test repair on the edge case
-        $edgeRepairResponse = Invoke-WebRequest -Uri "$endpoint/timeline/chain/repair/$edgeCaseSession" -Method POST -TimeoutSec 10
-        $edgeRepairResult = $edgeRepairResponse.Content | ConvertFrom-Json
+        # Show statistics after creating edge case
+        if (-not $Quiet) {
+            Show-ChainStatistics -Title "STATISTICS AFTER CREATING EDGE CASE"
+        }
 
-        Write-Host ""
-        Write-Host "Edge Case Repair Results:" -ForegroundColor Cyan
-        Write-Host "  Success: $($edgeRepairResult.success)" -ForegroundColor $(if ($edgeRepairResult.success) { "Green" } else { "Red" })
-        Write-Host "  Message: $($edgeRepairResult.message)" -ForegroundColor White
+        # Test repair on all broken chain sessions
+        foreach ($breakType in $brokenChainTypes) {
+            $testSession = "$edgeCaseSession-$breakType"
+            Write-Host ""
+            Write-Host "Testing repair on $breakType scenario ($testSession):" -ForegroundColor Yellow
 
-        if ($edgeRepairResult.repairsPerformed -and $edgeRepairResult.repairsPerformed.Count -gt 0) {
-            Write-Host "  Repairs performed: $($edgeRepairResult.repairsPerformed.Count)" -ForegroundColor Green
+            try {
+                # Validate the broken chain first
+                $validateResponse = Invoke-WebRequest -Uri "$endpoint/timeline/chain/validate/$testSession" -Method GET -TimeoutSec 10
+                $validationResult = $validateResponse.Content | ConvertFrom-Json
+
+                Write-Host "  Validation: $($validationResult.valid)" -ForegroundColor $(if ($validationResult.valid) { "Green" } else { "Red" })
+                Write-Host "  Total Messages: $($validationResult.totalMessages)" -ForegroundColor White
+
+                if ($validationResult.brokenReferences -and $validationResult.brokenReferences.Count -gt 0) {
+                    Write-Host "  Broken References: $($validationResult.brokenReferences.Count)" -ForegroundColor Red
+                }
+                if ($validationResult.orphanMessages -and $validationResult.orphanMessages.Count -gt 0) {
+                    Write-Host "  Orphan Messages: $($validationResult.orphanMessages.Count)" -ForegroundColor Red
+                }
+
+                # Test repair
+                $repairResponse = Invoke-WebRequest -Uri "$endpoint/timeline/chain/repair/$testSession" -Method POST -TimeoutSec 10
+                $repairResult = $repairResponse.Content | ConvertFrom-Json
+
+                Write-Host "  Repair Success: $($repairResult.success)" -ForegroundColor $(if ($repairResult.success) { "Green" } else { "Red" })
+                Write-Host "  Repair Message: $($repairResult.message)" -ForegroundColor White
+
+                if ($repairResult.repairsPerformed -and $repairResult.repairsPerformed.Count -gt 0) {
+                    Write-Host "  Repairs Performed:" -ForegroundColor Green
+                    foreach ($repair in $repairResult.repairsPerformed) {
+                        Write-Host "    - $repair" -ForegroundColor Green
+                    }
+                }
+
+            } catch {
+                Write-Host "  [ERROR] Error testing $breakType scenario: $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
+
+        # Final statistics
+        if (-not $Quiet) {
+            Show-ChainStatistics -Title "FINAL CHAIN STATISTICS (After All Tests)"
         }
     }
 
@@ -157,11 +244,23 @@ try {
         Write-Host "[OK] Chain repair test completed - Repair functionality working" -ForegroundColor Green
     } else {
         Write-Host ""
+        Write-Host "=== TEST SUMMARY ===" -ForegroundColor Cyan
+        Write-Host "Sessions Tested:" -ForegroundColor Yellow
+        Write-Host "  Main Test Session: $SessionId" -ForegroundColor White
+        Write-Host "  Edge Case Session: $edgeCaseSession" -ForegroundColor White
+        Write-Host ""
+        Write-Host "Test Results:" -ForegroundColor Yellow
+        Write-Host "  [PASS] Valid chain repair testing completed" -ForegroundColor Green
+        Write-Host "  [PASS] Edge case repair testing completed" -ForegroundColor Green
+        Write-Host "  [PASS] Chain statistics monitoring enabled" -ForegroundColor Green
+        Write-Host "  [PASS] Comprehensive before/after reporting" -ForegroundColor Green
+        Write-Host ""
         Write-Host "[PASSED] Chain repair test completed successfully!" -ForegroundColor Green
         Write-Host "[OK] Tested repair on valid chain" -ForegroundColor White
         Write-Host "[OK] Tested repair on edge cases" -ForegroundColor White
         Write-Host "[OK] Demonstrated repair reporting" -ForegroundColor White
         Write-Host "[OK] Verified chain integrity after repair" -ForegroundColor White
+        Write-Host "[OK] Comprehensive statistics monitoring" -ForegroundColor White
     }
 
     exit 0

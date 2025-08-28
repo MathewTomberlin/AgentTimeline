@@ -1,12 +1,19 @@
 param(
     [switch]$Quiet,
     [switch]$NoPause,
-    [string]$SessionId = "phase2-demo-session",
+    [string]$SessionId,
     [int]$MessageCount = 3
 )
 
 $testName = "Conversation Reconstruction Test (Phase 2)"
 $endpoint = "http://localhost:8080/api/v1"
+
+# Generate unique session ID if not provided
+if (-not $SessionId) {
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $random = Get-Random -Minimum 1000 -Maximum 9999
+    $SessionId = "test-session-$timestamp-$random"
+}
 
 if (-not $Quiet) {
     Write-Host "====================================" -ForegroundColor Cyan
@@ -149,13 +156,32 @@ try {
         Write-Host "  Child messages (with parent): $($childMessages.Count)" -ForegroundColor White
         Write-Host "  Total messages: $($chainMessages.Count)" -ForegroundColor White
 
-        # Show the chain structure
+        # Show the chain structure (in reconstruction order, not timestamp order)
         Write-Host ""
-        Write-Host "  Chain structure:" -ForegroundColor White
+        Write-Host "  Chain structure (reconstruction order):" -ForegroundColor White
         $currentId = $null
-        $chainMessages | Sort-Object timestamp | ForEach-Object {
+        foreach ($message in $chainMessages) {
             $arrow = if ($currentId) { " -> " } else { "" }
-            Write-Host "  ${arrow}$($_.role):$($_.id.Substring(0,8))" -ForegroundColor $(if ($_.role -eq "USER") { "Cyan" } else { "Magenta" })
+            Write-Host "  ${arrow}$($message.role):$($message.id.Substring(0,8))" -ForegroundColor $(if ($message.role -eq "USER") { "Cyan" } else { "Magenta" })
+            $currentId = $message.id
+        }
+
+        # Show timestamp-ordered versions for comparison
+        Write-Host ""
+        Write-Host "  Chain structure (API timestamp order - newest first):" -ForegroundColor Gray
+        $currentId = $null
+        foreach ($message in $timestampMessages) {
+            $arrow = if ($currentId) { " -> " } else { "" }
+            Write-Host "  ${arrow}$($message.role):$($message.id.Substring(0,8))" -ForegroundColor $(if ($message.role -eq "USER") { "DarkCyan" } else { "DarkMagenta" })
+            $currentId = $message.id
+        }
+
+        Write-Host ""
+        Write-Host "  Chain structure (true chronological order - oldest first):" -ForegroundColor DarkGray
+        $currentId = $null
+        $timestampMessages | Sort-Object { [DateTime]::Parse($_.timestamp) } | ForEach-Object {
+            $arrow = if ($currentId) { " -> " } else { "" }
+            Write-Host "  ${arrow}$($_.role):$($_.id.Substring(0,8))" -ForegroundColor $(if ($_.role -eq "USER") { "DarkCyan" } else { "DarkMagenta" })
             $currentId = $_.id
         }
     }

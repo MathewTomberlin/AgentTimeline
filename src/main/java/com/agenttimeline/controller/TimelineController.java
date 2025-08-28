@@ -130,6 +130,24 @@ public class TimelineController {
     }
 
     /**
+     * TEST ENDPOINT: Create broken chains for testing repair functionality
+     * This endpoint is for testing purposes only and creates intentionally broken message chains
+     */
+    @PostMapping("/test/create-broken-chain")
+    public ResponseEntity<String> createBrokenChain(
+            @RequestParam(defaultValue = "test-broken-chain") String sessionId,
+            @RequestParam(defaultValue = "orphaned") String breakType) {
+
+        try {
+            String result = timelineService.createBrokenChainForTesting(sessionId, breakType);
+            return ResponseEntity.ok("Broken chain created: " + result);
+        } catch (Exception e) {
+            log.error("Error creating broken chain for testing", e);
+            return ResponseEntity.internalServerError().body("Error: " + e.getMessage());
+        }
+    }
+
+    /**
      * Health check endpoint
      */
     @GetMapping("/health")
