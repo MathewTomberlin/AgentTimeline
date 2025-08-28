@@ -29,7 +29,7 @@ public class MessageChunkEmbedding {
     @Column(name = "chunk_text", columnDefinition = "TEXT", nullable = false)
     private String chunkText;
 
-    @Column(name = "embedding_vector", columnDefinition = "TEXT")
+    @Column(name = "embedding_vector", columnDefinition = "LONGTEXT")
     private String embeddingVectorJson;
 
     @Column(name = "chunk_index")
@@ -77,5 +77,9 @@ public class MessageChunkEmbedding {
         } else {
             this.embeddingVectorJson = null;
         }
+    }
+
+    public void setEmbeddingVectorJson(String embeddingVectorJson) {
+        this.embeddingVectorJson = embeddingVectorJson;
     }
 }

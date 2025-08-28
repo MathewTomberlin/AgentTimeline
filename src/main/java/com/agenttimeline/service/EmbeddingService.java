@@ -23,7 +23,7 @@ public class EmbeddingService {
     @Value("${ollama.base-url:http://localhost:11434}")
     private String ollamaBaseUrl;
 
-    @Value("${ollama.embedding-model:sam860/dolphin3-qwen2.5:3b}")
+    @Value("${ollama.embedding-model:nomic-embed-text}")
     private String embeddingModel;
 
     @Value("${ollama.timeout:30000}")
@@ -47,6 +47,7 @@ public class EmbeddingService {
 
         try {
             log.debug("Making request to Ollama API: {}", ollamaBaseUrl + "/api/embeddings");
+            log.debug("Request payload: model={}, text length={}", embeddingModel, text.length());
 
             OllamaEmbeddingResponse response = webClient.post()
                 .uri(ollamaBaseUrl + "/api/embeddings")
@@ -57,19 +58,27 @@ public class EmbeddingService {
                 .timeout(Duration.ofMillis(timeoutMs))
                 .block();
 
-            log.debug("Received response from Ollama API");
+            log.debug("Received response from Ollama API: {}", response);
 
-            if (response != null && response.getEmbedding() != null) {
+            if (response != null) {
+                log.debug("Response model: {}, done: {}", response.getModel(), response.isDone());
                 List<Double> embeddingList = response.getEmbedding();
-                double[] embeddingArray = new double[embeddingList.size()];
-                for (int i = 0; i < embeddingList.size(); i++) {
-                    embeddingArray[i] = embeddingList.get(i);
+                log.debug("Embedding list: {}", embeddingList);
+
+                if (embeddingList != null && !embeddingList.isEmpty()) {
+                    double[] embeddingArray = new double[embeddingList.size()];
+                    for (int i = 0; i < embeddingList.size(); i++) {
+                        embeddingArray[i] = embeddingList.get(i);
+                    }
+                    log.debug("Generated embedding with {} dimensions for text: {} chars",
+                        embeddingArray.length, text.length());
+                    return embeddingArray;
+                } else {
+                    log.error("Embedding list is null or empty in response");
+                    return new double[0];
                 }
-                log.debug("Generated embedding with {} dimensions for text: {} chars",
-                    embeddingArray.length, text.length());
-                return embeddingArray;
             } else {
-                log.error("Failed to generate embedding - response or embedding list is null");
+                log.error("Failed to generate embedding - response is null");
                 return new double[0];
             }
         } catch (Exception e) {

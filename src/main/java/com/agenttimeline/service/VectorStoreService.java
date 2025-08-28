@@ -2,6 +2,7 @@ package com.agenttimeline.service;
 
 import com.agenttimeline.model.MessageChunkEmbedding;
 import com.agenttimeline.repository.MessageChunkEmbeddingRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,8 @@ public class VectorStoreService {
     private final EmbeddingService embeddingService;
     private final MessageChunkEmbeddingRepository repository;
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     /**
      * Process a message by chunking it, generating embeddings, and storing everything
      * @param messageId The ID of the original message
@@ -33,34 +36,97 @@ public class VectorStoreService {
         try {
             // Chunk the message
             List<String> chunks = chunkingService.chunkTextWithOverlap(messageText);
+            log.debug("Generated {} chunks for message {}", chunks.size(), messageId);
+
             if (chunks.isEmpty()) {
                 log.warn("No chunks generated for message {}", messageId);
                 return 0;
             }
 
+            // Log first few chunks for debugging
+            if (!chunks.isEmpty()) {
+                log.debug("First chunk: '{}'", chunks.get(0).substring(0, Math.min(50, chunks.get(0).length())));
+            }
+
             // Generate embeddings for all chunks
+            log.debug("Starting embedding generation for {} chunks", chunks.size());
             List<double[]> embeddings = embeddingService.generateEmbeddings(chunks);
+            log.debug("Embedding generation completed, got {} embeddings", embeddings.size());
+
             if (embeddings.size() != chunks.size()) {
                 log.error("Mismatch between chunks ({}) and embeddings ({}) for message {}",
                     chunks.size(), embeddings.size(), messageId);
                 return 0;
             }
 
+            // Check if embeddings are valid (non-empty)
+            int validEmbeddings = 0;
+            for (double[] embedding : embeddings) {
+                if (embedding != null && embedding.length > 0) {
+                    validEmbeddings++;
+                }
+            }
+            log.debug("Valid embeddings: {}/{}", validEmbeddings, embeddings.size());
+
             // Create and save chunk embeddings
             List<MessageChunkEmbedding> chunkEmbeddings = IntStream.range(0, chunks.size())
-                .mapToObj(i -> MessageChunkEmbedding.builder()
-                    .messageId(messageId)
-                    .chunkText(chunks.get(i))
-                    .embeddingVector(embeddings.get(i))
-                    .chunkIndex(i)
-                    .sessionId(sessionId)
-                    .build())
+                .mapToObj(i -> {
+                    double[] embedding = embeddings.get(i);
+                    String embeddingJson = null;
+
+                    // Manually serialize the embedding to JSON
+                    try {
+                        embeddingJson = objectMapper.writeValueAsString(embedding);
+                        log.debug("Chunk {} - serialized embedding to JSON, length: {}", i, embeddingJson.length());
+                    } catch (Exception e) {
+                        log.error("Failed to serialize embedding for chunk {}: {}", i, e.getMessage());
+                    }
+
+                    MessageChunkEmbedding chunk = MessageChunkEmbedding.builder()
+                        .messageId(messageId)
+                        .chunkText(chunks.get(i))
+                        .chunkIndex(i)
+                        .sessionId(sessionId)
+                        .build();
+
+                    // Manually set the JSON string
+                    chunk.setEmbeddingVectorJson(embeddingJson);
+
+                    log.debug("Chunk {} created - embeddingJson length: {}", i,
+                        embeddingJson != null ? embeddingJson.length() : 0);
+
+                    return chunk;
+                })
                 .toList();
 
+            log.debug("About to save {} chunk embeddings", chunkEmbeddings.size());
             List<MessageChunkEmbedding> savedChunks = repository.saveAll(chunkEmbeddings);
+            log.debug("Saved {} chunk embeddings successfully", savedChunks.size());
 
             log.info("Successfully stored {} chunks for message {} (session: {})",
                 savedChunks.size(), messageId, sessionId);
+
+            // Debug: Check first saved chunk
+            if (!savedChunks.isEmpty()) {
+                MessageChunkEmbedding firstChunk = savedChunks.get(0);
+                log.debug("First saved chunk - ID: {}, embeddingVectorJson length: {}, embeddingVector: {}",
+                    firstChunk.getId(),
+                    firstChunk.getEmbeddingVectorJson() != null ? firstChunk.getEmbeddingVectorJson().length() : 0,
+                    firstChunk.getEmbeddingVector() != null ? firstChunk.getEmbeddingVector().length : "null");
+
+                // Additional debug: Test deserialization immediately after save
+                try {
+                    double[] testEmbedding = firstChunk.getEmbeddingVector();
+                    log.debug("Immediate deserialization test - embedding length: {}, first few values: [{}, {}, {}]",
+                        testEmbedding != null ? testEmbedding.length : 0,
+                        testEmbedding != null && testEmbedding.length > 0 ? testEmbedding[0] : "null",
+                        testEmbedding != null && testEmbedding.length > 1 ? testEmbedding[1] : "null",
+                        testEmbedding != null && testEmbedding.length > 2 ? testEmbedding[2] : "null");
+                } catch (Exception e) {
+                    log.error("Error during immediate deserialization test: {}", e.getMessage());
+                }
+            }
+
             return savedChunks.size();
 
         } catch (Exception e) {
@@ -122,7 +188,8 @@ public class VectorStoreService {
                 })
                 .map(chunk -> {
                     double similarity = cosineSimilarity(queryEmbedding, chunk.getEmbeddingVector());
-                    log.debug("Chunk {} similarity: {}", chunk.getId(), similarity);
+                    log.debug("Chunk {} similarity: {} (text: '{}')", chunk.getId(), similarity,
+                        chunk.getChunkText() != null ? chunk.getChunkText().substring(0, Math.min(30, chunk.getChunkText().length())) : "null");
                     return new SimilarityScore(chunk, similarity);
                 })
                 .sorted((a, b) -> Double.compare(b.similarity, a.similarity))
@@ -237,6 +304,8 @@ public class VectorStoreService {
         return repository.findBySessionId(sessionId);
     }
 
+
+
     /**
      * Delete all chunks for a specific message
      * @param messageId The message ID
@@ -288,6 +357,16 @@ public class VectorStoreService {
      * @param b Second vector
      * @return Cosine similarity score between 0.0 and 1.0
      */
+    public double calculateCosineSimilarity(double[] a, double[] b) {
+        return cosineSimilarity(a, b);
+    }
+
+    /**
+     * Calculate cosine similarity between two vectors (private implementation)
+     * @param a First vector
+     * @param b Second vector
+     * @return Cosine similarity score between 0.0 and 1.0
+     */
     private double cosineSimilarity(double[] a, double[] b) {
         if (a.length != b.length) {
             return 0.0;
@@ -309,6 +388,33 @@ public class VectorStoreService {
 
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
+
+    /**
+     * Get the embedding service for testing purposes
+     * @return The embedding service instance
+     */
+    public EmbeddingService getEmbeddingService() {
+        return embeddingService;
+    }
+
+    /**
+     * Test embedding generation directly within VectorStoreService
+     * @param text The text to embed
+     * @return The embedding result
+     */
+    public double[] testEmbeddingGeneration(String text) {
+        log.info("Testing embedding generation within VectorStoreService for text: '{}'", text);
+        try {
+            double[] embedding = embeddingService.generateEmbedding(text);
+            log.info("Embedding generation result: {} dimensions", embedding.length);
+            return embedding;
+        } catch (Exception e) {
+            log.error("Error in embedding generation test: {}", e.getMessage(), e);
+            return new double[0];
+        }
+    }
+
+
 
     /**
      * Helper record for similarity scoring

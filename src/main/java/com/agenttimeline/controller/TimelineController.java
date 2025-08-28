@@ -158,7 +158,7 @@ public class TimelineController {
     @PostMapping("/search/similar")
     public ResponseEntity<List<MessageChunkEmbedding>> searchSimilarChunks(
             @RequestBody Map<String, Object> request,
-            @RequestParam(defaultValue = "default") String sessionId) {
+            @RequestHeader(value = "sessionId", defaultValue = "default") String sessionId) {
 
         try {
             String query = (String) request.get("query");
@@ -169,10 +169,17 @@ public class TimelineController {
             }
 
             int searchLimit = limit != null ? limit : 5;
+            log.debug("Starting vector search for query '{}' in session '{}' with limit {}", query, sessionId, searchLimit);
+
             List<MessageChunkEmbedding> similarChunks = vectorStoreService.findSimilarChunks(
                 query, sessionId, searchLimit);
 
             log.info("Vector search completed for session {}: found {} similar chunks", sessionId, similarChunks.size());
+            log.debug("Similar chunks details: {}", similarChunks.stream()
+                .map(chunk -> String.format("ID:%d, Text:'%s...'",
+                    chunk.getId(),
+                    chunk.getChunkText() != null ? chunk.getChunkText().substring(0, Math.min(30, chunk.getChunkText().length())) : "null"))
+                .toList());
             return ResponseEntity.ok(similarChunks);
 
         } catch (Exception e) {
@@ -180,6 +187,8 @@ public class TimelineController {
             return ResponseEntity.internalServerError().build();
         }
     }
+
+
 
     /**
      * Search for similar message chunks across all sessions
@@ -342,6 +351,10 @@ public class TimelineController {
         }
     }
 
+
+
+
+
     /**
      * Reprocess all messages in a session for vector storage
      */
@@ -391,5 +404,81 @@ public class TimelineController {
             "features", "Message chaining, Conversation reconstruction, Chain validation, Vector embeddings, Similarity search",
             "timestamp", java.time.LocalDateTime.now().toString()
         ));
+    }
+
+    /**
+     * Test embedding generation endpoint
+     */
+    @PostMapping("/test/embedding")
+    public ResponseEntity<Map<String, Object>> testEmbedding(@RequestBody Map<String, String> request) {
+        try {
+            String testText = request.get("text");
+            if (testText == null || testText.trim().isEmpty()) {
+                testText = "This is a test message for embedding generation";
+            }
+
+            log.info("Testing embedding generation for text: '{}'", testText);
+
+            // Test embedding generation
+            double[] embedding = vectorStoreService.getEmbeddingService().generateEmbedding(testText);
+
+            Map<String, Object> response = Map.of(
+                "success", embedding.length > 0,
+                "text", testText,
+                "embeddingLength", embedding.length,
+                "firstFewValues", embedding.length > 0 ?
+                    java.util.Arrays.copyOfRange(embedding, 0, Math.min(5, embedding.length)) :
+                    new double[0]
+            );
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error testing embedding generation", e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "success", false,
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName()
+            ));
+        }
+    }
+
+    /**
+     * Test embedding generation within VectorStoreService
+     */
+    @PostMapping("/test/vectorstore-embedding")
+    public ResponseEntity<Map<String, Object>> testVectorStoreEmbedding(@RequestBody Map<String, String> request) {
+        try {
+            String testText = request.get("text");
+            if (testText == null || testText.trim().isEmpty()) {
+                testText = "Test embedding within VectorStoreService";
+            }
+
+            log.info("Testing embedding generation within VectorStoreService for text: '{}'", testText);
+
+            // Test embedding generation within VectorStoreService
+            double[] embedding = vectorStoreService.testEmbeddingGeneration(testText);
+
+            Map<String, Object> response = Map.of(
+                "success", embedding.length > 0,
+                "text", testText,
+                "embeddingLength", embedding.length,
+                "firstFewValues", embedding.length > 0 ?
+                    java.util.Arrays.copyOfRange(embedding, 0, Math.min(5, embedding.length)) :
+                    new double[0],
+                "testType", "VectorStoreService direct test"
+            );
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error testing VectorStoreService embedding generation", e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "success", false,
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName(),
+                "testType", "VectorStoreService direct test"
+            ));
+        }
     }
 }

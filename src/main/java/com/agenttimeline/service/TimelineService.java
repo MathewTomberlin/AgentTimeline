@@ -465,19 +465,21 @@ public class TimelineService {
      */
     private void processMessageForVectorStorage(String messageId, String messageText, String sessionId) {
         // Run vector processing asynchronously to avoid blocking
-        Thread.ofVirtual().start(() -> {
+        new Thread(() -> {
             try {
-                log.debug("Starting vector processing for message {} in session {}", messageId, sessionId);
+                log.info("Starting vector processing for message {} in session {}", messageId, sessionId);
                 int chunksCreated = vectorStoreService.processAndStoreMessage(messageId, messageText, sessionId);
 
                 if (chunksCreated > 0) {
                     log.info("Successfully processed message {} for vector storage: {} chunks created", messageId, chunksCreated);
                 } else {
-                    log.warn("Failed to process message {} for vector storage: no chunks created", messageId);
+                    log.error("Failed to process message {} for vector storage: no chunks created", messageId);
                 }
             } catch (Exception e) {
                 log.error("Error processing message {} for vector storage: {}", messageId, e.getMessage(), e);
+                // Print full stack trace
+                e.printStackTrace();
             }
-        });
+        }, "VectorProcessor-" + messageId).start();
     }
 }
