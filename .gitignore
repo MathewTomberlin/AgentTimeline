@@ -1,0 +1,315 @@
+# AgentTimeline Project .gitignore
+# ==================================
+# This file specifies which files and directories should be ignored by Git
+
+# ==================================
+# Maven Build Artifacts
+# ==================================
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+mvn-timing.properties
+*.lastUpdated
+
+# ==================================
+# IDE and Editor Files
+# ==================================
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+.idea_modules/
+atlassian-ide-plugin.xml
+com_crashlytics_export_strings.xml
+crashlytics.properties
+crashlytics-build.properties
+fabric.properties
+
+# Eclipse
+.metadata/
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.settings/
+.loadpath
+.recommenders
+.project
+.externalToolBuilders/
+*.launch
+.pydevproject
+.cproject
+.autotools
+.factorypath
+.buildpath
+.target
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# NetBeans
+nb-configuration.xml
+
+# Sublime Text
+*.tmlanguage
+*.tmPreferences
+*.stTheme
+*.sublime-workspace
+*.sublime-project
+
+# Vim
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+Session.vim
+Sessionx.vim
+.netrwhist
+*~
+tags
+[._]*.un~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+.org-id-locations
+*_archive
+*_flymake.*
+/eshell/history
+/eshell/lastdir
+/elpa/
+*.rel
+
+# ==================================
+# Operating System Files
+# ==================================
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ==================================
+# Application-Specific Files
+# ==================================
+
+# Logs
+logs/
+*.log
+*.log.*
+log/
+*.log4j
+*.log4j.*
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+
+# Application configuration overrides
+application-local.yml
+application-local.properties
+application-dev.yml
+application-dev.properties
+application-test.yml
+application-test.properties
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Redis data and configuration
+redis/
+redis.zip
+dump.rdb
+appendonly.aof
+
+# ==================================
+# Development and Testing
+# ==================================
+
+# Test results and coverage
+test-results/
+coverage/
+*.exec
+cobertura.ser
+
+# JUnit/TestNG
+TEST-*.xml
+testng-results.xml
+surefire-reports/
+failsafe-reports/
+
+# Spring Boot
+spring.log
+*.original
+application.pid
+
+# Node.js (if any frontend components)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# ==================================
+# Security and Secrets
+# ==================================
+*.p12
+*.pfx
+*.cer
+*.crt
+*.key
+*.pem
+*.jks
+*.keystore
+secrets/
+credentials/
+*.secret
+
+# ==================================
+# Package Files
+# ==================================
+*.jar
+*.war
+*.ear
+*.nar
+*.sar
+*.rar
+*.zip
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.7z
+
+# ==================================
+# Documentation and Assets
+# ==================================
+*.pdf
+*.doc
+*.docx
+*.ppt
+*.pptx
+*.xls
+*.xlsx
+screenshots/
+assets/
+
+# ==================================
+# Backup and Archive Files
+# ==================================
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*~
+
+# ==================================
+# Custom Project-Specific
+# ==================================
+
+# AgentTimeline specific
+# Add any project-specific ignores here
+
+# Example: If you have local data directories
+data/
+*.data
+
+# Example: If you have local configuration
+config/local/
+*.local
+
+# ==================================
+# Git and Version Control
+# ==================================
+*.patch
+*.diff
+*.orig
+*.rej
+.gitattributes
+
+# ==================================
+# Miscellaneous
+# ==================================
+*.tgz
+*.tbz2
+*.txz
+.cache/
+*.class
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# ==================================
+# END OF .GITIGNORE
+# ==================================
