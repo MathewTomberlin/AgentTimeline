@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: agent-timeline
+
+  # Redis Configuration
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+
+  # Web Configuration
+  web:
+    cors:
+      allowed-origins: http://localhost:3000, http://localhost:8080
+      allowed-methods: GET, POST, PUT, DELETE, OPTIONS
+      allowed-headers: "*"
+
+# Ollama Configuration
+ollama:
+  base-url: http://localhost:11434
+  model: sam860/dolphin3-qwen2.5:3b
+  timeout: 30000
+
+# Logging Configuration
+logging:
+  level:
+    com.agenttimeline: DEBUG
+    org.springframework.data.redis: DEBUG
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+server:
+  port: 8080
+  servlet:
+    context-path: /api/v1
