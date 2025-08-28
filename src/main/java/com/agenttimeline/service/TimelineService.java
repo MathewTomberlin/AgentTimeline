@@ -20,6 +20,7 @@ public class TimelineService {
     private final OllamaService ollamaService;
     private final MessageRepository messageRepository;
     private final MessageChainValidator chainValidator;
+    private final VectorStoreService vectorStoreService;
 
     /**
      * Process user message with message chaining
@@ -41,6 +42,9 @@ public class TimelineService {
         log.info("Saved user message with ID: {} at timestamp: {} (nano: {})",
             savedUserMessage.getId(), userMessageEntity.getTimestamp(), userMessageEntity.getTimestamp().toLocalTime().toNanoOfDay());
 
+        // Process user message for vector storage (async to avoid blocking)
+        processMessageForVectorStorage(savedUserMessage.getId(), userMessage, sessionId);
+
         return ollamaService.generateResponse(userMessage)
                 .map(ollamaResponse -> {
                     // Capture assistant message timestamp when response arrives
@@ -61,6 +65,10 @@ public class TimelineService {
                     log.info("Saved assistant message with ID: {} at timestamp: {} (nano: {}) (parent: {}, response time: {}ms)",
                         savedAssistantMessage.getId(), assistantMessage.getTimestamp(),
                         assistantMessage.getTimestamp().toLocalTime().toNanoOfDay(), savedUserMessage.getId(), responseTime);
+
+                    // Process assistant message for vector storage (async to avoid blocking)
+                    processMessageForVectorStorage(savedAssistantMessage.getId(),
+                        ollamaResponse.getResponse(), sessionId);
 
                     return savedAssistantMessage;
                 });
@@ -449,5 +457,27 @@ public class TimelineService {
             errorStats.put("error", "Failed to generate statistics: " + e.getMessage());
             return errorStats;
         }
+    }
+
+    /**
+     * Process a message for vector storage (chunking and embedding)
+     * This runs asynchronously to avoid blocking the main message processing flow
+     */
+    private void processMessageForVectorStorage(String messageId, String messageText, String sessionId) {
+        // Run vector processing asynchronously to avoid blocking
+        Thread.ofVirtual().start(() -> {
+            try {
+                log.debug("Starting vector processing for message {} in session {}", messageId, sessionId);
+                int chunksCreated = vectorStoreService.processAndStoreMessage(messageId, messageText, sessionId);
+
+                if (chunksCreated > 0) {
+                    log.info("Successfully processed message {} for vector storage: {} chunks created", messageId, chunksCreated);
+                } else {
+                    log.warn("Failed to process message {} for vector storage: no chunks created", messageId);
+                }
+            } catch (Exception e) {
+                log.error("Error processing message {} for vector storage: {}", messageId, e.getMessage(), e);
+            }
+        });
     }
 }

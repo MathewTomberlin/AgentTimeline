@@ -92,7 +92,203 @@ Phase 3 has been successfully implemented with comprehensive testing and validat
 - Updated documentation to reflect new test and validation capabilities.
 - All changes are backward compatible and covered by new and existing tests.
 
+## Phase 4: Chunking, Embedding, Vector Storage, and Similarity Search for Augmented Generation
 
+### ✅ **COMPLETED COMPONENTS:**
 
+#### **1. Tech Stack Implementation**
+- **✅ PostgreSQL Integration**: Spring Data JPA configured with PostgreSQL
+- **✅ Database Schema**: `message_chunk_embeddings` table created
+- **✅ Entity Model**: `MessageChunkEmbedding` entity implemented
+- **✅ Repository Layer**: `MessageChunkEmbeddingRepository` with CRUD operations
+- **✅ Service Architecture**:
+  - `ChunkingService`: Splits messages into chunks (✅ implemented)
+  - `EmbeddingService`: Calls Ollama for embeddings (⚠️ **NON-FUNCTIONAL**)
+  - `VectorStoreService`: Manages storage and similarity search (⚠️ **NON-FUNCTIONAL**)
+- **✅ API Endpoints**: All vector endpoints implemented and accessible
+- **✅ Integration**: Automatic chunking triggered after message processing
 
+#### **2. Working Components Confirmed by Tests**
+- **✅ Health Check**: Phase 4 features detected
+- **✅ Message Processing**: Chat messages processed successfully
+- **✅ Chunking**: 127-328 chunks created per message
+- **✅ Storage**: Chunks saved to PostgreSQL database
+- **✅ Chunk Retrieval**: API returns chunks correctly
+- **✅ Debug Endpoints**: Working and provide detailed information
+
+#### **3. Test Results Summary**
+```
+✅ Health Check: UP, Phase 4 features detected
+✅ Chat Processing: Message sent, 943 chars response
+✅ Chunk Creation: 127 chunks initially, 328 after reprocessing
+✅ Data Storage: Chunks saved to PostgreSQL
+✅ API Endpoints: All endpoints responding
+❌ Similarity Search: "No similar chunks found"
+❌ Embedding Generation: HasEmbedding: False, Dimensions: 0
+```
+
+### ❌ **NON-FUNCTIONAL COMPONENTS:**
+
+#### **🔴 Primary Issue: Embedding Generation Failure**
+**Problem**: Similarity search fails because embeddings are not being generated.
+
+**Evidence from Debug Logs**:
+```
+Sample chunks:
+  ID: 5531, Message: 3b0f3370-c4fb-4ab9-83ab-6ce59e9d6a22, HasEmbedding: False, Dimensions: 0
+  ID: 5532, Message: 3b0f3370-c4fb-4ab9-83ab-6ce59e9d6a22, HasEmbedding: False, Dimensions: 0
+  ID: 5533, Message: 3b0f3370-c4fb-4ab9-83ab-6ce59e9d6a22, HasEmbedding: False, Dimensions: 0
+```
+
+**Root Cause**: The `EmbeddingService` is not successfully generating embeddings from the Ollama service.
+
+**Impact**: Since no embeddings exist, similarity search cannot find similar chunks.
+
+#### **🔴 Secondary Issue: Similarity Search Implementation**
+**Problem**: Even if embeddings were generated, the similarity search logic may have issues.
+
+**Evidence**: After reprocessing (which should regenerate embeddings), similarity search still fails:
+```
+Reprocessed messages: 2
+Total chunks created: 328
+Similarity search: "Search failed after reprocessing"
+```
+
+### 🔍 **DEBUGGING CLUES:**
+
+#### **1. Embedding Service Investigation**
+**Where to Look**:
+- `src/main/java/com/agenttimeline/service/EmbeddingService.java`
+- Check Ollama connectivity and embedding model configuration
+- Verify embedding API calls are successful
+- Examine error handling in embedding generation
+
+**Key Questions**:
+- Is Ollama running and accessible?
+- Is the embedding model (`nomic-embed-text`) loaded?
+- Are embedding requests being sent correctly?
+- Is the response being parsed properly?
+
+#### **2. Vector Store Service Investigation**
+**Where to Look**:
+- `src/main/java/com/agenttimeline/service/VectorStoreService.java`
+- Check if embeddings are being saved to database correctly
+- Verify similarity search query logic
+- Examine database connection and vector operations
+
+**Key Questions**:
+- Are embeddings being passed to the vector store?
+- Is the PostgreSQL vector extension working?
+- Are similarity search queries constructed correctly?
+- Is the cosine similarity calculation working?
+
+#### **3. Integration Points Investigation**
+**Where to Look**:
+- `src/main/java/com/agenttimeline/service/TimelineService.java`
+- Check if embedding pipeline is being called after message save
+- Verify async processing of embeddings
+- Examine error handling in the integration points
+
+**Key Questions**:
+- Is the embedding pipeline triggered after message processing?
+- Are there any exceptions being swallowed?
+- Is the async processing working correctly?
+
+### 🛠️ **NEXT STEPS FOR DEBUGGING:**
+
+#### **1. Immediate Debugging Actions**
+```bash
+# Check Ollama service status
+curl http://localhost:11434/api/tags
+
+# Check if embedding model is loaded
+curl http://localhost:11434/api/show -d '{"name":"nomic-embed-text"}'
+
+# Test embedding generation manually
+curl http://localhost:11434/api/embeddings -d '{"model":"nomic-embed-text","prompt":"test message"}'
+```
+
+#### **2. Application Log Investigation**
+- Enable DEBUG logging for embedding and vector services
+- Check application logs for embedding generation errors
+- Look for Ollama connection issues
+- Examine database operation logs
+
+#### **3. Code Review Priority**
+1. **EmbeddingService.generateEmbedding()** - Core embedding logic
+2. **VectorStoreService.findSimilarChunks()** - Similarity search implementation
+3. **TimelineService.processMessageForVectorStorage()** - Integration point
+4. **MessageChunkEmbedding entity** - Database mapping
+
+### 📊 **CURRENT SYSTEM STATUS:**
+
+```
+┌─────────────────────────────────────┐
+│           WORKING ✅                 │
+├─────────────────────────────────────┤
+│ • Message Processing                 │
+│ • Chunk Creation (127-328 chunks)    │
+│ • Database Storage                   │
+│ • API Endpoints                      │
+│ • Debug Functionality                │
+└─────────────────────────────────────┘
+┌─────────────────────────────────────┐
+│        NON-FUNCTIONAL ❌             │
+├─────────────────────────────────────┤
+│ • Embedding Generation (0/328)       │
+│ • Similarity Search (fails)          │
+│ • Vector Operations                  │
+└─────────────────────────────────────┘
+```
+
+**Overall Status**: Phase 4 is **70% complete** - infrastructure is solid, but embedding generation is the blocking issue preventing similarity search from working.
+
+### Phase 4 Implementation Checklist
+
+#### ✅ **COMPLETED INFRASTRUCTURE**
+- [x] PostgreSQL installed and configured with Spring Data JPA
+- [x] `message_chunk_embeddings` table created in PostgreSQL
+- [x] `MessageChunkEmbedding` entity defined (using JSON storage for vectors)
+- [x] `MessageChunkEmbeddingRepository` implemented with basic CRUD operations
+- [x] `ChunkingService` implemented for splitting messages into chunks
+- [x] `EmbeddingService` implemented (but **NON-FUNCTIONAL** - see debugging section)
+- [x] `VectorStoreService` implemented (but **NON-FUNCTIONAL** - see debugging section)
+- [x] Integration in `TimelineService` to chunk and store after message save
+- [x] API endpoints added for similarity search and embedding management
+- [x] Debug endpoints working and providing detailed information
+- [x] Powershell and batch scripts created for automated endpoint testing
+- [x] Basic chunking and storage verified working (127-328 chunks created)
+
+#### ⚠️ **NON-FUNCTIONAL COMPONENTS (BLOCKING ISSUES)**
+- [x] Embedding generation pipeline exists but **FAILS** (0/328 chunks have embeddings)
+- [x] Similarity search implemented but **FAILS** (no embeddings to search)
+- [x] Vector operations not working (root cause: no embeddings generated)
+- [x] Context augmentation blocked (similarity search fails)
+- [x] End-to-end embedding flow broken at Ollama integration
+
+#### 🔧 **DEBUGGING REQUIRED**
+- [ ] **CRITICAL**: Fix `EmbeddingService.generateEmbedding()` - Ollama integration failing
+- [ ] **CRITICAL**: Fix `VectorStoreService.findSimilarChunks()` - similarity search logic
+- [ ] **HIGH**: Verify Ollama service connectivity and model loading
+- [ ] **HIGH**: Test embedding API calls manually
+- [ ] **MEDIUM**: Add comprehensive error logging to embedding pipeline
+- [ ] **MEDIUM**: Verify async processing in `TimelineService` integration
+- [ ] **LOW**: Add unit tests for embedding and vector operations (after fixes)
+
+#### 🧪 **TESTING STATUS**
+- [x] Health check endpoint working (Phase 4 features detected)
+- [x] Message processing working (chat endpoint functional)
+- [x] Chunk creation working (127-328 chunks per message)
+- [x] Database storage working (chunks saved successfully)
+- [x] API endpoints working (all vector endpoints responding)
+- [x] Debug functionality working (detailed chunk information available)
+- [ ] Similarity search **FAILING** (root cause: no embeddings)
+- [ ] Embedding generation **FAILING** (0/328 chunks have embeddings)
+
+### 📈 **PHASE 4 PROGRESS SUMMARY**
+
+**Completed**: 70% (Infrastructure solid, chunking/storage working)
+**Blocked**: 30% (Embedding generation and similarity search non-functional)
+
+**Next Priority**: Debug and fix embedding generation in `EmbeddingService.java`
 

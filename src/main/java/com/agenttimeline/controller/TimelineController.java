@@ -1,8 +1,10 @@
 package com.agenttimeline.controller;
 
 import com.agenttimeline.model.Message;
+import com.agenttimeline.model.MessageChunkEmbedding;
 import com.agenttimeline.service.MessageChainValidator;
 import com.agenttimeline.service.TimelineService;
+import com.agenttimeline.service.VectorStoreService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +21,7 @@ import java.util.Map;
 public class TimelineController {
 
     private final TimelineService timelineService;
+    private final VectorStoreService vectorStoreService;
 
     /**
      * Chat endpoint with message chaining
@@ -147,6 +150,235 @@ public class TimelineController {
         }
     }
 
+    // ==================== VECTOR SEARCH AND EMBEDDING ENDPOINTS ====================
+
+    /**
+     * Search for similar message chunks within a session using vector similarity
+     */
+    @PostMapping("/search/similar")
+    public ResponseEntity<List<MessageChunkEmbedding>> searchSimilarChunks(
+            @RequestBody Map<String, Object> request,
+            @RequestParam(defaultValue = "default") String sessionId) {
+
+        try {
+            String query = (String) request.get("query");
+            Integer limit = (Integer) request.get("limit");
+
+            if (query == null || query.trim().isEmpty()) {
+                return ResponseEntity.badRequest().build();
+            }
+
+            int searchLimit = limit != null ? limit : 5;
+            List<MessageChunkEmbedding> similarChunks = vectorStoreService.findSimilarChunks(
+                query, sessionId, searchLimit);
+
+            log.info("Vector search completed for session {}: found {} similar chunks", sessionId, similarChunks.size());
+            return ResponseEntity.ok(similarChunks);
+
+        } catch (Exception e) {
+            log.error("Error performing vector similarity search", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Search for similar message chunks across all sessions
+     */
+    @PostMapping("/search/similar/global")
+    public ResponseEntity<List<MessageChunkEmbedding>> searchSimilarChunksGlobal(
+            @RequestBody Map<String, Object> request) {
+
+        try {
+            String query = (String) request.get("query");
+            Integer limit = (Integer) request.get("limit");
+
+            if (query == null || query.trim().isEmpty()) {
+                return ResponseEntity.badRequest().build();
+            }
+
+            int searchLimit = limit != null ? limit : 10;
+            List<MessageChunkEmbedding> similarChunks = vectorStoreService.findSimilarChunksGlobal(
+                query, searchLimit);
+
+            log.info("Global vector search completed: found {} similar chunks", similarChunks.size());
+            return ResponseEntity.ok(similarChunks);
+
+        } catch (Exception e) {
+            log.error("Error performing global vector similarity search", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Search for similar chunks within a similarity threshold
+     */
+    @PostMapping("/search/threshold/{sessionId}")
+    public ResponseEntity<List<MessageChunkEmbedding>> searchWithinThreshold(
+            @PathVariable String sessionId,
+            @RequestBody Map<String, Object> request) {
+
+        try {
+            String query = (String) request.get("query");
+            Double threshold = (Double) request.get("threshold");
+
+            if (query == null || query.trim().isEmpty()) {
+                return ResponseEntity.badRequest().build();
+            }
+
+            double similarityThreshold = threshold != null ? threshold : 0.7;
+            List<MessageChunkEmbedding> similarChunks = vectorStoreService.findSimilarChunksWithinThreshold(
+                query, sessionId, similarityThreshold);
+
+            log.info("Threshold search completed for session {}: found {} chunks within threshold {}",
+                sessionId, similarChunks.size(), similarityThreshold);
+            return ResponseEntity.ok(similarChunks);
+
+        } catch (Exception e) {
+            log.error("Error performing threshold-based vector search", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Get all chunks for a specific message
+     */
+    @GetMapping("/chunks/message/{messageId}")
+    public ResponseEntity<List<MessageChunkEmbedding>> getChunksForMessage(@PathVariable String messageId) {
+        try {
+            List<MessageChunkEmbedding> chunks = vectorStoreService.getChunksForMessage(messageId);
+            return ResponseEntity.ok(chunks);
+        } catch (Exception e) {
+            log.error("Error retrieving chunks for message: {}", messageId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Get all chunks for a specific session
+     */
+    @GetMapping("/chunks/session/{sessionId}")
+    public ResponseEntity<List<MessageChunkEmbedding>> getChunksForSession(@PathVariable String sessionId) {
+        try {
+            List<MessageChunkEmbedding> chunks = vectorStoreService.getChunksForSession(sessionId);
+            return ResponseEntity.ok(chunks);
+        } catch (Exception e) {
+            log.error("Error retrieving chunks for session: {}", sessionId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Get vector store statistics
+     */
+    @GetMapping("/vector/statistics")
+    public ResponseEntity<VectorStoreService.VectorStoreStatistics> getVectorStoreStatistics() {
+        try {
+            VectorStoreService.VectorStoreStatistics stats = vectorStoreService.getStatistics();
+            return ResponseEntity.ok(stats);
+        } catch (Exception e) {
+            log.error("Error retrieving vector store statistics", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Manually trigger vector processing for a message (for testing/backfilling)
+     */
+    @PostMapping("/vector/process")
+    public ResponseEntity<Map<String, Object>> processMessageForVector(
+            @RequestBody Map<String, String> request) {
+
+        try {
+            String messageId = request.get("messageId");
+            String messageText = request.get("messageText");
+            String sessionId = request.get("sessionId");
+
+            if (messageId == null || messageText == null || sessionId == null) {
+                return ResponseEntity.badRequest().build();
+            }
+
+            int chunksCreated = vectorStoreService.processAndStoreMessage(messageId, messageText, sessionId);
+
+            Map<String, Object> response = Map.of(
+                "messageId", messageId,
+                "chunksCreated", chunksCreated,
+                "success", chunksCreated > 0
+            );
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error manually processing message for vector storage", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Debug endpoint to inspect chunks for a session
+     */
+    @GetMapping("/debug/chunks/{sessionId}")
+    public ResponseEntity<Map<String, Object>> debugChunks(@PathVariable String sessionId) {
+        try {
+            List<MessageChunkEmbedding> chunks = vectorStoreService.getChunksForSession(sessionId);
+
+            Map<String, Object> response = Map.of(
+                "sessionId", sessionId,
+                "totalChunks", chunks.size(),
+                "chunks", chunks.stream().map(chunk -> Map.of(
+                    "id", chunk.getId(),
+                    "messageId", chunk.getMessageId(),
+                    "chunkIndex", chunk.getChunkIndex(),
+                    "chunkText", chunk.getChunkText() != null ? chunk.getChunkText().substring(0, Math.min(50, chunk.getChunkText().length())) + "..." : null,
+                    "hasEmbedding", chunk.getEmbeddingVector() != null && chunk.getEmbeddingVector().length > 0,
+                    "embeddingDimensions", chunk.getEmbeddingVector() != null ? chunk.getEmbeddingVector().length : 0
+                )).toList()
+            );
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error getting debug info for session: {}", sessionId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Reprocess all messages in a session for vector storage
+     */
+    @PostMapping("/vector/reprocess/{sessionId}")
+    public ResponseEntity<Map<String, Object>> reprocessSession(@PathVariable String sessionId) {
+        try {
+            List<Message> messages = timelineService.getSessionMessages(sessionId);
+
+            int totalChunks = 0;
+            int processedMessages = 0;
+
+            for (Message message : messages) {
+                int chunks = vectorStoreService.processAndStoreMessage(
+                    message.getId(),
+                    message.getContent(),
+                    sessionId
+                );
+                totalChunks += chunks;
+                processedMessages++;
+                log.info("Reprocessed message {}: {} chunks", message.getId(), chunks);
+            }
+
+            Map<String, Object> response = Map.of(
+                "sessionId", sessionId,
+                "processedMessages", processedMessages,
+                "totalChunks", totalChunks,
+                "success", true
+            );
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error reprocessing session: {}", sessionId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
     /**
      * Health check endpoint
      */
@@ -155,8 +387,8 @@ public class TimelineController {
         return ResponseEntity.ok(Map.of(
             "status", "UP",
             "service", "AgentTimeline API",
-            "phase", "2",
-            "features", "Message chaining, Conversation reconstruction, Chain validation",
+            "phase", "4",
+            "features", "Message chaining, Conversation reconstruction, Chain validation, Vector embeddings, Similarity search",
             "timestamp", java.time.LocalDateTime.now().toString()
         ));
     }
