@@ -269,6 +269,7 @@ public class VectorStoreService {
                 .filter(chunk -> chunk.getEmbeddingVector() != null && chunk.getEmbeddingVector().length > 0)
                 .filter(chunk -> {
                     double similarity = cosineSimilarity(queryEmbedding, chunk.getEmbeddingVector());
+                    log.debug("Chunk {} similarity score: {} (threshold: {})", chunk.getId(), similarity, threshold);
                     return similarity >= threshold;
                 })
                 .sorted((a, b) -> Double.compare(

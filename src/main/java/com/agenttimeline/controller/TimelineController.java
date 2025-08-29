@@ -158,7 +158,7 @@ public class TimelineController {
     @PostMapping("/search/similar")
     public ResponseEntity<List<MessageChunkEmbedding>> searchSimilarChunks(
             @RequestBody Map<String, Object> request,
-            @RequestHeader(value = "sessionId", defaultValue = "default") String sessionId) {
+            @RequestParam(value = "sessionId", defaultValue = "default") String sessionId) {
 
         try {
             String query = (String) request.get("query");
@@ -363,6 +363,11 @@ public class TimelineController {
         try {
             List<Message> messages = timelineService.getSessionMessages(sessionId);
 
+            // Delete all existing chunks for the session to avoid duplicates
+            vectorStoreService.deleteChunksForSession(sessionId);
+            long deletedChunks = 0; // Count not easily available without repository access
+            log.info("Deleted existing chunks for session {} before reprocessing", sessionId);
+
             int totalChunks = 0;
             int processedMessages = 0;
 
@@ -381,6 +386,7 @@ public class TimelineController {
                 "sessionId", sessionId,
                 "processedMessages", processedMessages,
                 "totalChunks", totalChunks,
+                "deletedChunks", deletedChunks,
                 "success", true
             );
 

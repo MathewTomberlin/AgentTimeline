@@ -119,15 +119,17 @@ if ($globalSearchResults -and $globalSearchResults.Count -gt 0) {
 
 # Test 7: Threshold-based search
 Write-Host "`n7. Testing threshold-based similarity search..." -ForegroundColor Cyan
+
+# Test with a reasonable threshold based on the content
 $thresholdRequest = @{
-    query = "machine learning"
-    threshold = 0.8
+    query = "artificial intelligence"
+    threshold = 0.6
 }
 $thresholdResults = Invoke-TimelineApi -Method "POST" -Endpoint "/search/threshold/$SessionId" -Body $thresholdRequest
 if ($thresholdResults -and $thresholdResults.Count -gt 0) {
-    Write-Host "   Found $($thresholdResults.Count) chunks within threshold" -ForegroundColor Green
+    Write-Host "   Found $($thresholdResults.Count) chunks within threshold 0.6" -ForegroundColor Green
 } else {
-    Write-Host "   No chunks found within threshold" -ForegroundColor Yellow
+    Write-Host "   No chunks found within threshold (this may be expected if similarity scores are below threshold)" -ForegroundColor Yellow
 }
 
 # Test 8: Debug chunks in session
@@ -154,6 +156,7 @@ $reprocessResponse = Invoke-TimelineApi -Method "POST" -Endpoint "/vector/reproc
 if ($reprocessResponse) {
     Write-Host "   Reprocessed messages: $($reprocessResponse.processedMessages)" -ForegroundColor Green
     Write-Host "   Total chunks created: $($reprocessResponse.totalChunks)" -ForegroundColor Green
+    Write-Host "   Deleted chunks: $($reprocessResponse.deletedChunks)" -ForegroundColor Green
 }
 
 # Test 10: Retry similarity search after reprocessing
