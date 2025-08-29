@@ -97,31 +97,22 @@ public class TimelineService {
         try {
             log.debug("Starting Phase 6 enhanced response generation for session {}", sessionId);
 
-            // Step 1: Extract key information from user message (async)
-            CompletableFuture<KeyInformationExtractor.ExtractedInformation> keyInfoFuture =
-                CompletableFuture.supplyAsync(() ->
-                    keyInformationExtractor.extractInformation(savedUserMessage, sessionId));
-
-            // Step 2: Retrieve conversation context (before adding current message)
+            // Step 1: Retrieve conversation context (before adding current message)
             ConversationHistoryManager.ConversationContext conversationContext =
                 conversationHistoryManager.getConversationContext(sessionId);
 
-            // Step 3: Retrieve relevant historical chunks using configurable service
+            // Step 2: Retrieve relevant historical chunks using configurable service
             List<ConfigurableContextRetrievalService.ExpandedChunkGroup> relevantChunks =
                 configurableContextRetrievalService.retrieveContext(userMessage, sessionId, savedUserMessage.getId());
 
-            // Step 4: Wait for key information extraction to complete
-            KeyInformationExtractor.ExtractedInformation keyInformation = keyInfoFuture.join();
-
-            // Step 5: Build enhanced prompt using all context sources
+            // Step 3: Build enhanced prompt using conversation context and retrieved chunks
             String enhancedPrompt = enhancedPromptBuilder.buildEnhancedPrompt(
-                userMessage, conversationContext, keyInformation, relevantChunks, sessionId);
+                userMessage, conversationContext, relevantChunks, sessionId);
 
-            // Step 6: Generate response using enhanced prompt
-            return enhancedOllamaService.generateResponseWithContext(userMessage,
-                convertToLegacyFormat(relevantChunks), sessionId)
+            // Step 6: Generate response using the Phase 6 enhanced prompt directly
+            return enhancedOllamaService.generateResponseWithPreBuiltPrompt(enhancedPrompt, sessionId)
                 .doOnNext(ollamaResponse -> {
-                    // Store the enhanced prompt for debugging
+                    // Store the enhanced prompt for debugging (same prompt that was sent to LLM)
                     lastEnhancedPrompts.put(sessionId, enhancedPrompt);
                     log.debug("Stored Phase 6 enhanced prompt for session {}: {} chars", sessionId, enhancedPrompt.length());
                 })

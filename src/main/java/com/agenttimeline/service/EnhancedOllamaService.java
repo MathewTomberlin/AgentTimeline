@@ -82,7 +82,29 @@ public class EnhancedOllamaService {
 
             log.debug("Enhanced prompt length: {} characters", enhancedPrompt.length());
 
-            OllamaRequest request = new OllamaRequest(defaultModel, enhancedPrompt, false);
+            return generateResponseWithPreBuiltPrompt(enhancedPrompt, sessionId);
+
+        } catch (Exception e) {
+            log.error("Error generating enhanced response for session {}: {}", sessionId, e.getMessage(), e);
+            // Fallback to basic response without context
+            return generateBasicResponse(userMessage, sessionId);
+        }
+    }
+
+    /**
+     * Generate a response using a pre-built prompt string.
+     * This method allows using prompts constructed elsewhere (e.g., Phase 6 EnhancedPromptBuilder).
+     *
+     * @param prompt The complete prompt string to send to the LLM
+     * @param sessionId Session ID for logging
+     * @return AI response using the provided prompt
+     */
+    public Mono<OllamaResponse> generateResponseWithPreBuiltPrompt(String prompt, String sessionId) {
+        log.debug("Generating response for session {} using pre-built prompt ({} characters)",
+            sessionId, prompt.length());
+
+        try {
+            OllamaRequest request = new OllamaRequest(defaultModel, prompt, false);
 
             return webClient.post()
                     .uri("/api/generate")
@@ -90,14 +112,14 @@ public class EnhancedOllamaService {
                     .bodyValue(request)
                     .retrieve()
                     .bodyToMono(OllamaResponse.class)
-                    .doOnNext(response -> log.debug("Enhanced Ollama response received for session {}", sessionId))
-                    .doOnError(error -> log.error("Error calling enhanced Ollama API for session {}: {}",
+                    .doOnNext(response -> log.debug("Ollama response received for session {}", sessionId))
+                    .doOnError(error -> log.error("Error calling Ollama API for session {}: {}",
                         sessionId, error.getMessage(), error));
 
         } catch (Exception e) {
-            log.error("Error generating enhanced response for session {}: {}", sessionId, e.getMessage(), e);
+            log.error("Error generating response for session {}: {}", sessionId, e.getMessage(), e);
             // Fallback to basic response without context
-            return generateBasicResponse(userMessage, sessionId);
+            return generateBasicResponse(prompt, sessionId);
         }
     }
 
@@ -274,10 +296,10 @@ public class EnhancedOllamaService {
     /**
      * Fallback method to generate basic response without context.
      */
-    private Mono<OllamaResponse> generateBasicResponse(String userMessage, String sessionId) {
+    private Mono<OllamaResponse> generateBasicResponse(String input, String sessionId) {
         log.warn("Falling back to basic response generation for session {}", sessionId);
 
-        OllamaRequest request = new OllamaRequest(defaultModel, userMessage, false);
+        OllamaRequest request = new OllamaRequest(defaultModel, input, false);
 
         return webClient.post()
                 .uri("/api/generate")

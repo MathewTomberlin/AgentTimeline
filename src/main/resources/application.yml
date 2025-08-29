@@ -53,7 +53,7 @@ conversation:
   history:
     # Rolling window size (number of recent messages to keep)
     window:
-      size: 10
+      size: 2
       max-summary-length: 1000
     # History retention settings
     retention:
@@ -79,10 +79,10 @@ context:
       before: 2
       after: 2
       max-per-group: 5
-    # Similarity search parameters
+    # Similarity search parameters (higher thresholds for better relevance)
     similarity:
-      threshold: 0.3
-      max-results: 5
+      threshold: 0.6
+      max-results: 3
     # Adaptive retrieval settings
     adaptive:
       enabled: true

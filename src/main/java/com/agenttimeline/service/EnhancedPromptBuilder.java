@@ -2,11 +2,18 @@ package com.agenttimeline.service;
 
 import com.agenttimeline.model.Message;
 import com.agenttimeline.model.MessageChunkEmbedding;
+import com.agenttimeline.model.OllamaRequest;
+import com.agenttimeline.model.OllamaResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
 
+import reactor.core.publisher.Mono;
+
+import java.time.Duration;
 import java.util.*;
 
 /**
@@ -25,6 +32,8 @@ import java.util.*;
 @RequiredArgsConstructor
 @Slf4j
 public class EnhancedPromptBuilder {
+
+    private final WebClient webClient;
 
     // Configuration parameters
     @Value("${prompt.max.length:4000}")
@@ -45,6 +54,13 @@ public class EnhancedPromptBuilder {
     @Value("${prompt.chatml.format.enabled:true}")
     private boolean chatmlFormatEnabled;
 
+    // Ollama configuration for LLM-based extraction
+    @Value("${ollama.model:sam860/dolphin3-qwen2.5:3b}")
+    private String defaultModel;
+
+    @Value("${ollama.base-url:http://localhost:11434}")
+    private String ollamaBaseUrl;
+
 
 
     /**
@@ -52,21 +68,18 @@ public class EnhancedPromptBuilder {
      *
      * @param userMessage The current user message
      * @param conversationContext Immediate conversation context
-     * @param keyInformation Extracted key information
      * @param relevantChunks Historical chunks from vector search
      * @param sessionId Session ID for logging
      * @return Enhanced prompt string
      */
     public String buildEnhancedPrompt(String userMessage,
                                     ConversationHistoryManager.ConversationContext conversationContext,
-                                    KeyInformationExtractor.ExtractedInformation keyInformation,
                                     List<ConfigurableContextRetrievalService.ExpandedChunkGroup> relevantChunks,
                                     String sessionId) {
 
-        log.debug("Building enhanced prompt for session {} with context sources: conversation={}, keyInfo={}, chunks={}",
+        log.debug("Building enhanced prompt for session {} with context sources: conversation={}, chunks={}",
             sessionId,
             conversationContext != null ? "present" : "null",
-            keyInformation != null ? "present" : "null",
             relevantChunks != null ? relevantChunks.size() : 0);
 
         PromptComponents components = new PromptComponents();
@@ -79,14 +92,9 @@ public class EnhancedPromptBuilder {
             components.addConversationHistory(buildConversationHistorySection(conversationContext));
         }
 
-        // Add key information
-        if (keyInformation != null && !keyInformation.isEmpty()) {
-            components.addKeyInformation(buildKeyInformationSection(keyInformation));
-        }
-
-        // Add historical context
+        // Add chunk summary as assistant message
         if (relevantChunks != null && !relevantChunks.isEmpty()) {
-            components.addHistoricalContext(buildHistoricalContextSection(relevantChunks));
+            components.addChunkSummary(buildChunkSummarySection(relevantChunks, sessionId));
         }
 
         // Add current message
@@ -138,81 +146,100 @@ public class EnhancedPromptBuilder {
     }
 
     /**
-     * Build key information section with improved format.
+     * Build chunk summary section using LLM-based information extraction.
      */
-    private String buildKeyInformationSection(KeyInformationExtractor.ExtractedInformation info) {
-        StringBuilder section = new StringBuilder();
-
-        boolean hasContent = false;
-
-        // Add entities
-        if (!info.getEntities().isEmpty()) {
-            section.append("KEY ENTITIES: ").append(String.join(", ", info.getEntities())).append("\n");
-            hasContent = true;
-        }
-
-        // Add key facts
-        if (!info.getKeyFacts().isEmpty() && info.getKeyFacts().size() <= 3) {
-            section.append("IMPORTANT FACTS:\n");
-            for (String fact : info.getKeyFacts()) {
-                section.append("- ").append(fact).append("\n");
-            }
-            hasContent = true;
-        }
-
-        // Add user intent (if applicable)
-        if (info.getUserIntent() != null) {
-            section.append("USER INTENT: ").append(info.getUserIntent()).append("\n");
-            hasContent = true;
-        }
-
-        if (hasContent) {
-            section.append("\n");
-        }
-
-        return section.toString();
-    }
-
-    /**
-     * Build historical context section from retrieved chunks with improved format.
-     */
-    private String buildHistoricalContextSection(List<ConfigurableContextRetrievalService.ExpandedChunkGroup> chunks) {
+    private String buildChunkSummarySection(List<ConfigurableContextRetrievalService.ExpandedChunkGroup> chunks, String sessionId) {
         if (chunks == null || chunks.isEmpty()) {
             return "";
         }
 
-        StringBuilder section = new StringBuilder();
-        section.append("ADDITIONAL CONTEXT:\n");
-
-        // Deduplicate and limit context chunks
-        Set<String> seenChunks = new HashSet<>();
-        int maxChunks = 3; // Limit to prevent overload
-        int count = 0;
-
-        for (ConfigurableContextRetrievalService.ExpandedChunkGroup group : chunks) {
-            if (count >= maxChunks) break;
-
-            String text = group.getCombinedText();
-            if (text != null && !text.trim().isEmpty() && !seenChunks.contains(text)) {
-                // Clean up repetitive or irrelevant context
-                if (!isRepetitiveContext(text)) {
-                    section.append("- ").append(text.trim());
-                    if (!text.endsWith(".")) {
-                        section.append(".");
-                    }
-                    section.append("\n");
-                    seenChunks.add(text);
-                    count++;
+        try {
+            // Use LLM to extract key information from all chunks
+            StringBuilder allChunksText = new StringBuilder();
+            for (ConfigurableContextRetrievalService.ExpandedChunkGroup group : chunks) {
+                String combinedText = group.getCombinedText();
+                if (combinedText != null && !combinedText.trim().isEmpty()) {
+                    allChunksText.append(combinedText.trim()).append("\n");
                 }
             }
+
+            if (allChunksText.length() == 0) {
+                return "";
+            }
+
+            // Extract key information using LLM
+            String extractedInfo = extractKeyInformationWithLLM(allChunksText.toString().trim(), sessionId);
+
+            if (extractedInfo != null && !extractedInfo.trim().isEmpty()) {
+                log.debug("LLM extracted information for session {}: {}", sessionId, extractedInfo);
+                return extractedInfo;
+            }
+
+        } catch (Exception e) {
+            log.error("Error extracting information with LLM for session {}: {}", sessionId, e.getMessage(), e);
         }
 
-        if (count > 0) {
-            section.append("\n");
-        }
-
-        return section.toString();
+        // Fallback to basic summary if LLM extraction fails
+        return "I recall some details from our previous conversation.";
     }
+
+    /**
+     * Extract key information from text using LLM.
+     */
+    private String extractKeyInformationWithLLM(String text, String sessionId) {
+        try {
+            String extractionPrompt = String.format(
+                "You are an expert information extraction assistant. Analyze the following conversation text and create a brief, natural summary from the assistant's perspective that captures the most important information a user might want to remember.\n\n" +
+                "CONVERSATION TEXT:\n%s\n\n" +
+                "INSTRUCTIONS:\n" +
+                "- Focus on personal information (names, locations, occupations)\n" +
+                "- Include important facts or preferences mentioned\n" +
+                "- Write in first person as if the assistant is recalling the information\n" +
+                "- Keep it concise (1-2 sentences)\n" +
+                "- Use natural, conversational language\n" +
+                "- If no important information is found, respond with an empty string\n\n" +
+                "SUMMARY:",
+                text
+            );
+
+            OllamaRequest request = new OllamaRequest(defaultModel, extractionPrompt, false);
+
+            Mono<OllamaResponse> responseMono = webClient.post()
+                .uri("/api/generate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(request)
+                .retrieve()
+                .bodyToMono(OllamaResponse.class)
+                .timeout(Duration.ofSeconds(10)) // Shorter timeout for extraction
+                .doOnError(error -> log.warn("LLM extraction failed for session {}: {}", sessionId, error.getMessage()));
+
+            OllamaResponse response = responseMono.block();
+            if (response != null && response.getResponse() != null) {
+                String extracted = response.getResponse().trim();
+
+                // Clean up the response
+                if (extracted.toLowerCase().contains("no important information") ||
+                    extracted.toLowerCase().contains("no significant information") ||
+                    extracted.length() < 10) {
+                    return "";
+                }
+
+                // Ensure it starts with "I" to make it first person
+                if (!extracted.toLowerCase().startsWith("i ")) {
+                    extracted = "I " + extracted.substring(0, 1).toLowerCase() + extracted.substring(1);
+                }
+
+                return extracted;
+            }
+
+        } catch (Exception e) {
+            log.error("Exception during LLM extraction for session {}: {}", sessionId, e.getMessage());
+        }
+
+        return "";
+    }
+
+
 
     /**
      * Check if context chunk is repetitive or unhelpful.
@@ -259,14 +286,11 @@ public class EnhancedPromptBuilder {
         prompt.append(buildChatMLSystemMessage()).append("\n");
         prompt.append("<|im_end|>\n");
 
-        // Add key information right after system message (before conversation history)
-        if (!components.getKeyInformation().isEmpty()) {
-            List<ChatMessage> keyInfoMessages = convertKeyInformationToMessages(components.getKeyInformation());
-            for (ChatMessage msg : keyInfoMessages) {
-                prompt.append("<|im_start|>").append(msg.getRole()).append("\n");
-                prompt.append(msg.getContent()).append("\n");
-                prompt.append("<|im_end|>\n");
-            }
+        // Add chunk summary as assistant message (before conversation history)
+        if (!components.getChunkSummary().isEmpty()) {
+            prompt.append("<|im_start|>assistant\n");
+            prompt.append(components.getChunkSummary()).append("\n");
+            prompt.append("<|im_end|>\n");
         }
 
         // Add conversation history (without key information and historical context)
@@ -305,9 +329,9 @@ public class EnhancedPromptBuilder {
         // System instructions first (clear and concise)
         prompt.append(components.getSystemContext()).append("\n\n");
 
-        // Add key information right after system (before conversation history)
-        if (!components.getKeyInformation().isEmpty()) {
-            prompt.append(components.getKeyInformation());
+        // Add chunk summary right after system (before conversation history)
+        if (!components.getChunkSummary().isEmpty()) {
+            prompt.append(components.getChunkSummary()).append("\n\n");
         }
 
         // Add conversation history
@@ -350,15 +374,7 @@ public class EnhancedPromptBuilder {
             messages.addAll(convertConversationHistoryToMessages(components.getConversationHistory()));
         }
 
-        // Convert key information to chat messages
-        if (!components.getKeyInformation().isEmpty()) {
-            messages.addAll(convertKeyInformationToMessages(components.getKeyInformation()));
-        }
-
-        // Convert historical context to chat messages
-        if (!components.getHistoricalContext().isEmpty()) {
-            messages.addAll(convertHistoricalContextToMessages(components.getHistoricalContext()));
-        }
+        // Chunk summary is handled separately in buildChatMLPrompt
 
         return messages;
     }
@@ -405,35 +421,9 @@ public class EnhancedPromptBuilder {
         return messages;
     }
 
-    /**
-     * Convert key information to chat message format.
-     */
-    private List<ChatMessage> convertKeyInformationToMessages(String keyInformation) {
-        List<ChatMessage> messages = new ArrayList<>();
 
-        if (keyInformation.trim().length() > 0) {
-            // Add key information as a system-like message from assistant
-            messages.add(new ChatMessage("assistant",
-                "Here is some key information that may be relevant: " + keyInformation.trim()));
-        }
 
-        return messages;
-    }
 
-    /**
-     * Convert historical context to chat message format.
-     */
-    private List<ChatMessage> convertHistoricalContextToMessages(String historicalContext) {
-        List<ChatMessage> messages = new ArrayList<>();
-
-        if (historicalContext.trim().length() > 0) {
-            // Add historical context as assistant providing context
-            messages.add(new ChatMessage("assistant",
-                "Additional relevant context from previous conversations: " + historicalContext.trim()));
-        }
-
-        return messages;
-    }
 
     /**
      * Extract user message content from current message section.
@@ -647,8 +637,7 @@ public class EnhancedPromptBuilder {
     private static class PromptComponents {
         private String systemContext = "";
         private String conversationHistory = "";
-        private String keyInformation = "";
-        private String historicalContext = "";
+        private String chunkSummary = "";
         private String currentMessage = "";
 
         public void addSystemContext(String systemContext) {
@@ -659,12 +648,8 @@ public class EnhancedPromptBuilder {
             this.conversationHistory = conversationHistory;
         }
 
-        public void addKeyInformation(String keyInformation) {
-            this.keyInformation = keyInformation;
-        }
-
-        public void addHistoricalContext(String historicalContext) {
-            this.historicalContext = historicalContext;
+        public void addChunkSummary(String chunkSummary) {
+            this.chunkSummary = chunkSummary;
         }
 
         public void addCurrentMessage(String currentMessage) {
@@ -674,8 +659,7 @@ public class EnhancedPromptBuilder {
         // Getters
         public String getSystemContext() { return systemContext; }
         public String getConversationHistory() { return conversationHistory; }
-        public String getKeyInformation() { return keyInformation; }
-        public String getHistoricalContext() { return historicalContext; }
+        public String getChunkSummary() { return chunkSummary; }
         public String getCurrentMessage() { return currentMessage; }
 
         // Checkers
@@ -683,14 +667,11 @@ public class EnhancedPromptBuilder {
             return conversationHistory != null && !conversationHistory.trim().isEmpty();
         }
 
-        public boolean hasKeyInformation() {
-            return keyInformation != null && !keyInformation.trim().isEmpty();
-        }
-
-        public boolean hasHistoricalContext() {
-            return historicalContext != null && !historicalContext.trim().isEmpty();
+        public boolean hasChunkSummary() {
+            return chunkSummary != null && !chunkSummary.trim().isEmpty();
         }
     }
 
 
 }
+

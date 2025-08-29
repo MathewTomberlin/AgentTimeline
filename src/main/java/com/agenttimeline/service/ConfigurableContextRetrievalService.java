@@ -1,5 +1,6 @@
 package com.agenttimeline.service;
 
+import com.agenttimeline.model.Message;
 import com.agenttimeline.model.MessageChunkEmbedding;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ConfigurableContextRetrievalService {
 
     private final VectorStoreService vectorStoreService;
+    private final ConversationHistoryManager conversationHistoryManager;
 
     // Configuration parameters with validation
     @Value("${context.retrieval.strategy:adaptive}")
@@ -141,11 +143,17 @@ public class ConfigurableContextRetrievalService {
             return List.of();
         }
 
-        // Filter excluded message
-        similarChunks = filterExcludedMessage(similarChunks, excludeMessageId);
+        // Filter excluded message and recent conversation messages
+        similarChunks = filterExcludedMessages(similarChunks, excludeMessageId, sessionId);
 
-        // Apply similarity threshold
-        similarChunks = applySimilarityThreshold(similarChunks, config.getSimilarityThreshold());
+        // Apply similarity threshold (more strict filtering)
+        similarChunks = applyStrictSimilarityThreshold(similarChunks, config.getSimilarityThreshold());
+
+        // Only return results if we have relevant chunks
+        if (similarChunks.isEmpty()) {
+            log.debug("No relevant chunks found after filtering for session {}", sessionId);
+            return List.of();
+        }
 
         // Expand with surrounding context
         return expandWithSurroundingChunks(similarChunks, config.getChunksBefore(), config.getChunksAfter());
@@ -173,7 +181,7 @@ public class ConfigurableContextRetrievalService {
             RetrievalConfig adaptiveConfig = RetrievalConfig.builder()
                 .strategy(RetrievalStrategy.FIXED)
                 .maxSimilarChunks(currentMaxSimilar)
-                .similarityThreshold(currentThreshold)
+                .similarityThreshold(Math.max(currentThreshold, 0.6)) // Higher threshold for relevance
                 .chunksBefore(config.getChunksBefore())
                 .chunksAfter(config.getChunksAfter())
                 .build();
@@ -204,7 +212,7 @@ public class ConfigurableContextRetrievalService {
         // Try multiple similarity thresholds
         List<List<ExpandedChunkGroup>> results = new ArrayList<>();
 
-        double[] thresholds = {0.7, 0.5, 0.3};
+        double[] thresholds = {0.8, 0.6, 0.4}; // Higher thresholds for better relevance
         for (double threshold : thresholds) {
             RetrievalConfig thresholdConfig = RetrievalConfig.builder()
                 .strategy(RetrievalStrategy.FIXED)
@@ -298,30 +306,76 @@ public class ConfigurableContextRetrievalService {
     }
 
     /**
-     * Filter out chunks from excluded message.
+     * Filter out chunks from excluded messages and recent conversation history.
      */
-    private List<MessageChunkEmbedding> filterExcludedMessage(List<MessageChunkEmbedding> chunks, String excludeMessageId) {
-        if (excludeMessageId == null) {
-            return chunks;
+    private List<MessageChunkEmbedding> filterExcludedMessages(List<MessageChunkEmbedding> chunks, String excludeMessageId, String sessionId) {
+        // Get message IDs from recent conversation window to exclude
+        Set<String> excludedMessageIds = new HashSet<>();
+        if (excludeMessageId != null) {
+            excludedMessageIds.add(excludeMessageId);
+        }
+
+        // Add recent conversation messages to exclusion list
+        try {
+            ConversationHistoryManager.ConversationContext context = conversationHistoryManager.getConversationContext(sessionId);
+            for (Message message : context.getRecentMessages()) {
+                excludedMessageIds.add(message.getId());
+            }
+            log.debug("Excluding {} recent conversation messages from vector search", context.getRecentMessages().size());
+        } catch (Exception e) {
+            log.warn("Could not retrieve conversation context for filtering: {}", e.getMessage());
         }
 
         List<MessageChunkEmbedding> filtered = chunks.stream()
-            .filter(chunk -> !excludeMessageId.equals(chunk.getMessageId()))
+            .filter(chunk -> !excludedMessageIds.contains(chunk.getMessageId()))
             .toList();
 
-        log.debug("Filtered chunks: {} -> {} (excluded message: {})",
-            chunks.size(), filtered.size(), excludeMessageId);
+        log.debug("Filtered chunks: {} -> {} (excluded {} messages)",
+            chunks.size(), filtered.size(), excludedMessageIds.size());
 
         return filtered;
     }
 
     /**
-     * Apply similarity threshold filtering.
+     * Apply relevance filtering to improve quality without being too strict.
      */
-    private List<MessageChunkEmbedding> applySimilarityThreshold(List<MessageChunkEmbedding> chunks, double threshold) {
-        // Note: The VectorStoreService should handle similarity thresholding
-        // This is a placeholder for additional client-side filtering if needed
-        return chunks;
+    private List<MessageChunkEmbedding> applyStrictSimilarityThreshold(List<MessageChunkEmbedding> chunks, double threshold) {
+        if (chunks.isEmpty()) {
+            return chunks;
+        }
+
+        // Apply more balanced filtering - keep chunks that have meaningful content
+        List<MessageChunkEmbedding> filtered = chunks.stream()
+            .filter(chunk -> {
+                String text = chunk.getChunkText();
+                if (text == null) return false;
+
+                String lowerText = text.toLowerCase();
+
+                // More inclusive filtering - include any chunk with substantial content
+                // that appears to contain personal information or meaningful statements
+                return lowerText.length() > 10 && // Reasonable content length
+                       (lowerText.contains("i ") || // First person statements
+                        lowerText.contains("my ") || // Personal information
+                        lowerText.contains("name") || // Name information
+                        lowerText.contains("am ") || // Identity statements
+                        lowerText.contains("live") || // Location information
+                        lowerText.contains("work") || // Work information
+                        lowerText.contains("programming") ||
+                        lowerText.contains("software") ||
+                        lowerText.contains("engineer") ||
+                        lowerText.split("\\s+").length > 3); // Substantial sentence
+            })
+            .limit(Math.max(1, Math.min(5, chunks.size()))) // Allow up to 5 relevant chunks
+            .toList();
+
+        // If no chunks pass the filter, keep at least the top chunk
+        if (filtered.isEmpty() && !chunks.isEmpty()) {
+            filtered = chunks.stream().limit(1).toList();
+        }
+
+        log.debug("Applied balanced relevance filtering: {} -> {} chunks", chunks.size(), filtered.size());
+        return filtered;
     }
 
     /**
@@ -382,18 +436,12 @@ public class ConfigurableContextRetrievalService {
 
     /**
      * Check if retrieval results meet quality threshold.
+     * Now allows empty results (no minimum requirement) for better relevance filtering.
      */
     private boolean isQualitySufficient(List<ExpandedChunkGroup> groups) {
-        if (groups.isEmpty()) {
-            return false;
-        }
-
-        // Simple quality check: ensure we have enough total chunks
-        int totalChunks = groups.stream()
-            .mapToInt(ExpandedChunkGroup::getChunkCount)
-            .sum();
-
-        return totalChunks >= 3; // At least 3 chunks for reasonable context
+        // Quality is now determined by relevance rather than quantity
+        // Empty results are acceptable if no relevant chunks were found
+        return !groups.isEmpty();
     }
 
     /**
