@@ -529,7 +529,7 @@ public class TimelineController {
 
             // Step 1: Get expanded groups using ContextRetrievalService
             List<ContextRetrievalService.ExpandedChunkGroup> expandedGroups =
-                contextRetrievalService.retrieveContext(userMessage, sessionId);
+                contextRetrievalService.retrieveContext(userMessage, sessionId, null);
 
             // Step 2: Merge overlapping groups using ChunkGroupManager
             List<ChunkGroupManager.ContextChunkGroup> contextGroups =

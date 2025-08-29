@@ -77,9 +77,9 @@ public class TimelineService {
     private Mono<Message> generateEnhancedResponse(String userMessage, String sessionId,
                                                  Message savedUserMessage, LocalDateTime userMessageTimestamp) {
         try {
-            // Step 3: Retrieve relevant context chunks
+            // Step 3: Retrieve relevant context chunks (excluding current message)
             List<ContextRetrievalService.ExpandedChunkGroup> expandedGroups =
-                contextRetrievalService.retrieveContext(userMessage, sessionId);
+                contextRetrievalService.retrieveContext(userMessage, sessionId, savedUserMessage.getId());
 
             if (expandedGroups.isEmpty()) {
                 log.debug("No context retrieved, falling back to basic response for session {}", sessionId);

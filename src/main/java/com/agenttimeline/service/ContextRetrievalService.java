@@ -42,8 +42,20 @@ public class ContextRetrievalService {
      * @return List of relevant context chunks with surrounding context
      */
     public List<ExpandedChunkGroup> retrieveContext(String userMessage, String sessionId) {
-        log.debug("Retrieving context for user message in session {}: '{}'",
-            sessionId, userMessage.substring(0, Math.min(50, userMessage.length())));
+        return retrieveContext(userMessage, sessionId, null);
+    }
+
+    /**
+     * Retrieve relevant context chunks for a user message within a session, excluding a specific message.
+     *
+     * @param userMessage The user's current message
+     * @param sessionId The session ID to search within
+     * @param excludeMessageId Message ID to exclude from context (typically the current message)
+     * @return List of relevant context chunks with surrounding context
+     */
+    public List<ExpandedChunkGroup> retrieveContext(String userMessage, String sessionId, String excludeMessageId) {
+        log.debug("Retrieving context for user message in session {}: '{}' (excluding message: {})",
+            sessionId, userMessage.substring(0, Math.min(50, userMessage.length())), excludeMessageId);
 
         try {
             // 1. Find similar chunks using vector search
@@ -57,7 +69,21 @@ public class ContextRetrievalService {
 
             log.debug("Found {} similar chunks for context retrieval", similarChunks.size());
 
-            // 2. Expand each chunk with surrounding context
+            // 2. Filter out chunks from the message we want to exclude (current message)
+            if (excludeMessageId != null) {
+                similarChunks = similarChunks.stream()
+                    .filter(chunk -> !excludeMessageId.equals(chunk.getMessageId()))
+                    .collect(ArrayList::new, (list, chunk) -> list.add(chunk), ArrayList::addAll);
+
+                log.debug("After excluding message {}, {} chunks remain", excludeMessageId, similarChunks.size());
+
+                if (similarChunks.isEmpty()) {
+                    log.debug("No chunks remain after excluding message {}", excludeMessageId);
+                    return List.of();
+                }
+            }
+
+            // 3. Expand each chunk with surrounding context
             Set<ExpandedChunkGroup> expandedGroups = new LinkedHashSet<>();
             for (MessageChunkEmbedding chunk : similarChunks) {
                 List<MessageChunkEmbedding> surroundingChunks = getSurroundingChunks(
@@ -68,7 +94,8 @@ public class ContextRetrievalService {
             }
 
             List<ExpandedChunkGroup> result = new ArrayList<>(expandedGroups);
-            log.info("Retrieved {} expanded chunk groups for session {}", result.size(), sessionId);
+            log.info("Retrieved {} expanded chunk groups for session {} (excluded message: {})",
+                result.size(), sessionId, excludeMessageId);
 
             return result;
 
