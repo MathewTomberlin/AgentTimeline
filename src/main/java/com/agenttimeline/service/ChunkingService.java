@@ -38,6 +38,20 @@ public class ChunkingService {
         int textLength = text.length();
         int currentPosition = 0;
 
+        // If text fits in one chunk, don't create overlapping chunks
+        int effectiveChunkChars = effectiveChunkSize * CHARS_PER_TOKEN;
+        if (textLength <= effectiveChunkChars) {
+            chunks.add(text.trim());
+            log.info("Text fits in single chunk: {} chars (limit: {} chars)",
+                textLength, effectiveChunkChars);
+            return chunks;
+        }
+
+        log.debug("Chunking text: length={}, chunkSizeTokens={}, overlapTokens={}, useOverlap={}",
+            textLength, chunkSizeTokens, overlapTokens, useOverlap);
+        log.debug("Effective values: chunkSize={}, overlap={}, chunkChars={}",
+            effectiveChunkSize, effectiveOverlap, effectiveChunkChars);
+
         while (currentPosition < textLength) {
             // Calculate chunk end position
             int chunkEnd = calculateChunkEnd(text, currentPosition, effectiveChunkSize);
@@ -51,9 +65,21 @@ public class ChunkingService {
             }
 
             // Move position for next chunk
-            if (useOverlap) {
-                currentPosition = Math.max(currentPosition + 1,
-                    chunkEnd - (effectiveOverlap * CHARS_PER_TOKEN));
+            if (useOverlap && chunkEnd < textLength) {
+                // Only use overlap if there's more text to process
+                int overlapChars = effectiveOverlap * CHARS_PER_TOKEN;
+                int nextPosition = Math.max(0, chunkEnd - overlapChars);
+
+                // Ensure we move forward
+                currentPosition = Math.max(currentPosition + 1, nextPosition);
+
+                // Safety check: if we can't advance meaningfully, disable overlap
+                if (currentPosition >= chunkEnd || currentPosition >= textLength - 10) {
+                    currentPosition = chunkEnd;
+                }
+
+                log.debug("Overlap: chunkEnd={}, overlapChars={}, nextPosition={}, currentPosition={}",
+                    chunkEnd, overlapChars, nextPosition, currentPosition);
             } else {
                 currentPosition = chunkEnd;
             }

@@ -416,8 +416,8 @@ public class TimelineController {
         return ResponseEntity.ok(Map.of(
             "status", "UP",
             "service", "AgentTimeline API",
-            "phase", "4",
-            "features", "Message chaining, Conversation reconstruction, Chain validation, Vector embeddings, Similarity search",
+            "phase", "5",
+            "features", "Message chaining, Conversation reconstruction, Chain validation, Vector embeddings, Similarity search, Context-augmented generation",
             "timestamp", java.time.LocalDateTime.now().toString()
         ));
     }

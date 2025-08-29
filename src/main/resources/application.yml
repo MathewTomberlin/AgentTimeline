@@ -72,6 +72,11 @@ context:
 logging:
   level:
     com.agenttimeline: DEBUG
+    com.agenttimeline.service.ChunkingService: DEBUG
+    com.agenttimeline.service.ContextRetrievalService: DEBUG
+    com.agenttimeline.service.EnhancedOllamaService: DEBUG
+    com.agenttimeline.service.VectorStoreService: DEBUG
+    com.agenttimeline.controller.TimelineController: DEBUG
     org.springframework.data.redis: DEBUG
   pattern:
     console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
