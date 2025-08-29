@@ -102,25 +102,22 @@ public class TimelineService {
                 CompletableFuture.supplyAsync(() ->
                     keyInformationExtractor.extractInformation(savedUserMessage, sessionId));
 
-            // Step 2: Add message to conversation history
-            conversationHistoryManager.addMessage(sessionId, savedUserMessage);
-
-            // Step 3: Retrieve conversation context
+            // Step 2: Retrieve conversation context (before adding current message)
             ConversationHistoryManager.ConversationContext conversationContext =
                 conversationHistoryManager.getConversationContext(sessionId);
 
-            // Step 4: Retrieve relevant historical chunks using configurable service
+            // Step 3: Retrieve relevant historical chunks using configurable service
             List<ConfigurableContextRetrievalService.ExpandedChunkGroup> relevantChunks =
                 configurableContextRetrievalService.retrieveContext(userMessage, sessionId, savedUserMessage.getId());
 
-            // Step 5: Wait for key information extraction to complete
+            // Step 4: Wait for key information extraction to complete
             KeyInformationExtractor.ExtractedInformation keyInformation = keyInfoFuture.join();
 
-            // Step 6: Build enhanced prompt using all context sources
+            // Step 5: Build enhanced prompt using all context sources
             String enhancedPrompt = enhancedPromptBuilder.buildEnhancedPrompt(
                 userMessage, conversationContext, keyInformation, relevantChunks, sessionId);
 
-            // Step 7: Generate response using enhanced prompt
+            // Step 6: Generate response using enhanced prompt
             return enhancedOllamaService.generateResponseWithContext(userMessage,
                 convertToLegacyFormat(relevantChunks), sessionId)
                 .doOnNext(ollamaResponse -> {
@@ -150,6 +147,9 @@ public class TimelineService {
 
                     // Add assistant message to conversation history
                     conversationHistoryManager.addMessage(sessionId, savedAssistantMessage);
+
+                    // Add user message to conversation history (after assistant response)
+                    conversationHistoryManager.addMessage(sessionId, savedUserMessage);
 
                     // Process assistant message for vector storage (async)
                     processMessageForVectorStorage(savedAssistantMessage.getId(),

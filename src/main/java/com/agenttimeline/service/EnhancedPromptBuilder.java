@@ -259,14 +259,24 @@ public class EnhancedPromptBuilder {
         prompt.append(buildChatMLSystemMessage()).append("\n");
         prompt.append("<|im_end|>\n");
 
-        // Convert all context into chat message format
-        List<ChatMessage> chatMessages = convertContextToChatMessages(components, sessionId);
+        // Add key information right after system message (before conversation history)
+        if (!components.getKeyInformation().isEmpty()) {
+            List<ChatMessage> keyInfoMessages = convertKeyInformationToMessages(components.getKeyInformation());
+            for (ChatMessage msg : keyInfoMessages) {
+                prompt.append("<|im_start|>").append(msg.getRole()).append("\n");
+                prompt.append(msg.getContent()).append("\n");
+                prompt.append("<|im_end|>\n");
+            }
+        }
 
-        // Add all context messages
-        for (ChatMessage msg : chatMessages) {
-            prompt.append("<|im_start|>").append(msg.getRole()).append("\n");
-            prompt.append(msg.getContent()).append("\n");
-            prompt.append("<|im_end|>\n");
+        // Add conversation history (without key information and historical context)
+        if (!components.getConversationHistory().isEmpty()) {
+            List<ChatMessage> historyMessages = convertConversationHistoryToMessages(components.getConversationHistory());
+            for (ChatMessage msg : historyMessages) {
+                prompt.append("<|im_start|>").append(msg.getRole()).append("\n");
+                prompt.append(msg.getContent()).append("\n");
+                prompt.append("<|im_end|>\n");
+            }
         }
 
         // Add current user message
@@ -295,17 +305,14 @@ public class EnhancedPromptBuilder {
         // System instructions first (clear and concise)
         prompt.append(components.getSystemContext()).append("\n\n");
 
-        // Add context sections in logical order
-        if (!components.getConversationHistory().isEmpty()) {
-            prompt.append(components.getConversationHistory());
-        }
-
+        // Add key information right after system (before conversation history)
         if (!components.getKeyInformation().isEmpty()) {
             prompt.append(components.getKeyInformation());
         }
 
-        if (!components.getHistoricalContext().isEmpty()) {
-            prompt.append(components.getHistoricalContext());
+        // Add conversation history
+        if (!components.getConversationHistory().isEmpty()) {
+            prompt.append(components.getConversationHistory());
         }
 
         // Current user message (clearly marked)
@@ -552,6 +559,33 @@ public class EnhancedPromptBuilder {
         }
 
         return "";
+    }
+
+    /**
+     * Truncate a section of text to fit within the specified length.
+     */
+    private String truncateSection(String section, int maxLength) {
+        if (section == null || section.length() <= maxLength) {
+            return section;
+        }
+
+        // Find a good break point (sentence, then word boundary)
+        int truncateAt = maxLength - 50; // Leave room for truncation message
+        if (truncateAt < 0) truncateAt = maxLength / 2;
+
+        // Try to break at sentence end
+        int lastSentence = section.lastIndexOf(".", truncateAt);
+        if (lastSentence > maxLength * 0.7) {
+            truncateAt = lastSentence + 1;
+        } else {
+            // Try to break at word boundary
+            int lastSpace = section.lastIndexOf(" ", truncateAt);
+            if (lastSpace > maxLength * 0.5) {
+                truncateAt = lastSpace;
+            }
+        }
+
+        return section.substring(0, truncateAt) + "\n[...content truncated due to length...]\n";
     }
 
     /**

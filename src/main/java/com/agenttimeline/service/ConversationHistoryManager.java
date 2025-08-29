@@ -94,7 +94,10 @@ public class ConversationHistoryManager {
             List<Message> messages = new ArrayList<>(window.getMessages());
             String summary = window.getSummary();
 
-            log.debug("Retrieved conversation context for session {}: {} messages, summary length: {}",
+            // Sort messages by timestamp in ascending order (oldest first)
+            messages.sort(Comparator.comparing(Message::getTimestamp));
+
+            log.debug("Retrieved conversation context for session {}: {} messages (sorted by timestamp), summary length: {}",
                 sessionId, messages.size(), summary != null ? summary.length() : 0);
 
             return new ConversationContext(messages, summary);
