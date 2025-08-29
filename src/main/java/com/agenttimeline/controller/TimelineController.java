@@ -2,6 +2,10 @@ package com.agenttimeline.controller;
 
 import com.agenttimeline.model.Message;
 import com.agenttimeline.model.MessageChunkEmbedding;
+import com.agenttimeline.service.ChunkGroupManager;
+import com.agenttimeline.service.ChunkingService;
+import com.agenttimeline.service.ContextRetrievalService;
+import com.agenttimeline.service.EnhancedOllamaService;
 import com.agenttimeline.service.MessageChainValidator;
 import com.agenttimeline.service.TimelineService;
 import com.agenttimeline.service.VectorStoreService;
@@ -11,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -22,6 +27,11 @@ public class TimelineController {
 
     private final TimelineService timelineService;
     private final VectorStoreService vectorStoreService;
+
+    // Phase 5: Context-Augmented Generation Services
+    private final ContextRetrievalService contextRetrievalService;
+    private final ChunkGroupManager chunkGroupManager;
+    private final EnhancedOllamaService enhancedOllamaService;
 
     /**
      * Chat endpoint with message chaining
@@ -484,6 +494,168 @@ public class TimelineController {
                 "error", e.getMessage(),
                 "errorType", e.getClass().getSimpleName(),
                 "testType", "VectorStoreService direct test"
+            ));
+        }
+    }
+
+    /**
+     * DEBUG ENDPOINT: Inspect Phase 5 context retrieval pipeline
+     * This endpoint allows detailed inspection of the context retrieval process
+     */
+    @GetMapping("/debug/context/{sessionId}")
+    public ResponseEntity<Map<String, Object>> debugContextRetrieval(
+            @PathVariable String sessionId,
+            @RequestParam String userMessage) {
+        try {
+            log.info("Debug context retrieval for session {} with message: '{}'", sessionId, userMessage);
+
+            // Step 1: Get expanded groups using ContextRetrievalService
+            List<ContextRetrievalService.ExpandedChunkGroup> expandedGroups =
+                contextRetrievalService.retrieveContext(userMessage, sessionId);
+
+            // Step 2: Merge overlapping groups using ChunkGroupManager
+            List<ChunkGroupManager.ContextChunkGroup> contextGroups =
+                chunkGroupManager.mergeOverlappingGroups(expandedGroups);
+
+            // Step 3: Construct enhanced prompt using EnhancedOllamaService
+            String enhancedPrompt = enhancedOllamaService.constructEnhancedPrompt(userMessage, contextGroups);
+
+            // Build comprehensive debug response
+            Map<String, Object> debugInfo = new HashMap<>();
+            debugInfo.put("sessionId", sessionId);
+            debugInfo.put("userMessage", userMessage);
+            debugInfo.put("timestamp", java.time.LocalDateTime.now().toString());
+
+            // Expanded groups details
+            List<Map<String, Object>> expandedGroupsInfo = expandedGroups.stream()
+                .map(group -> {
+                    Map<String, Object> groupInfo = new HashMap<>();
+                    groupInfo.put("messageId", group.getMessageId());
+                    groupInfo.put("chunkCount", group.getChunkCount());
+                    groupInfo.put("combinedText", group.getCombinedText());
+
+                    // Individual chunk details
+                    List<Map<String, Object>> chunksInfo = group.getChunks().stream()
+                        .map(chunk -> {
+                            Map<String, Object> chunkInfo = new HashMap<>();
+                            chunkInfo.put("id", chunk.getId());
+                            chunkInfo.put("index", chunk.getChunkIndex());
+                            chunkInfo.put("text", chunk.getChunkText());
+                            chunkInfo.put("textLength", chunk.getChunkText() != null ? chunk.getChunkText().length() : 0);
+                            chunkInfo.put("hasEmbedding", chunk.getEmbeddingVector() != null);
+                            return chunkInfo;
+                        })
+                        .toList();
+                    groupInfo.put("chunks", chunksInfo);
+
+                    return groupInfo;
+                })
+                .toList();
+            debugInfo.put("expandedGroups", expandedGroupsInfo);
+
+            // Merged groups details
+            List<Map<String, Object>> mergedGroupsInfo = contextGroups.stream()
+                .map(group -> {
+                    Map<String, Object> groupInfo = new HashMap<>();
+                    groupInfo.put("messageId", group.getMessageId());
+                    groupInfo.put("totalChunks", group.getTotalChunks());
+                    groupInfo.put("combinedText", group.getCombinedText());
+                    groupInfo.put("earliestTimestamp", group.getEarliestTimestamp());
+                    groupInfo.put("latestTimestamp", group.getLatestTimestamp());
+                    return groupInfo;
+                })
+                .toList();
+            debugInfo.put("mergedGroups", mergedGroupsInfo);
+
+            // Enhanced prompt details
+            debugInfo.put("enhancedPrompt", enhancedPrompt);
+            debugInfo.put("promptLength", enhancedPrompt.length());
+            debugInfo.put("wordCount", enhancedPrompt.split("\\s+").length);
+
+            // Configuration info
+            debugInfo.put("configuration", Map.of(
+                "chunksBefore", contextRetrievalService.getChunksBefore(),
+                "chunksAfter", contextRetrievalService.getChunksAfter(),
+                "maxSimilarChunks", contextRetrievalService.getMaxSimilarChunks(),
+                "maxContextGroups", enhancedOllamaService.getMaxContextGroups(),
+                "maxTotalChunks", enhancedOllamaService.getMaxTotalChunks(),
+                "maxPromptLength", enhancedOllamaService.getMaxPromptLength(),
+                "truncationEnabled", enhancedOllamaService.isEnableTruncation()
+            ));
+
+            log.info("Debug context retrieval completed for session {}: {} expanded groups, {} merged groups, {} char prompt",
+                sessionId, expandedGroups.size(), contextGroups.size(), enhancedPrompt.length());
+
+            return ResponseEntity.ok(debugInfo);
+
+        } catch (Exception e) {
+            log.error("Error in debug context retrieval for session {}: {}", sessionId, e.getMessage(), e);
+            Map<String, Object> errorInfo = Map.of(
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName(),
+                "sessionId", sessionId,
+                "userMessage", userMessage,
+                "timestamp", java.time.LocalDateTime.now().toString()
+            );
+            return ResponseEntity.internalServerError().body(errorInfo);
+        }
+    }
+
+    /**
+     * DEBUG ENDPOINT: Test chunking service directly
+     */
+    @PostMapping("/debug/chunking")
+    public ResponseEntity<Map<String, Object>> debugChunking(@RequestBody Map<String, String> request) {
+        try {
+            String text = request.get("text");
+            if (text == null || text.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Text parameter is required"));
+            }
+
+            log.info("Debug chunking test for text: '{}'", text.substring(0, Math.min(50, text.length())));
+
+            // Test different chunking methods
+            ChunkingService chunkingService = new ChunkingService();
+
+            List<String> chunksNoOverlap = chunkingService.chunkText(text);
+            List<String> chunksWithOverlap = chunkingService.chunkTextWithOverlap(text);
+
+            Map<String, Object> chunkingInfo = Map.of(
+                "originalText", text,
+                "originalLength", text.length(),
+                "estimatedTokens", chunkingService.estimateTokens(text),
+                "chunksNoOverlap", Map.of(
+                    "count", chunksNoOverlap.size(),
+                    "chunks", chunksNoOverlap.stream()
+                        .map(chunk -> Map.of(
+                            "text", chunk,
+                            "length", chunk.length(),
+                            "estimatedTokens", chunkingService.estimateTokens(chunk)
+                        ))
+                        .toList()
+                ),
+                "chunksWithOverlap", Map.of(
+                    "count", chunksWithOverlap.size(),
+                    "chunks", chunksWithOverlap.stream()
+                        .map(chunk -> Map.of(
+                            "text", chunk,
+                            "length", chunk.length(),
+                            "estimatedTokens", chunkingService.estimateTokens(chunk)
+                        ))
+                        .toList()
+                )
+            );
+
+            log.info("Chunking debug completed: {} chunks without overlap, {} with overlap",
+                chunksNoOverlap.size(), chunksWithOverlap.size());
+
+            return ResponseEntity.ok(chunkingInfo);
+
+        } catch (Exception e) {
+            log.error("Error in chunking debug: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName()
             ));
         }
     }

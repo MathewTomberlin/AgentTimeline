@@ -43,6 +43,31 @@ ollama:
   embedding-model: nomic-embed-text
   timeout: 30000
 
+# Phase 5: Context-Augmented Generation Configuration
+context:
+  # Enable/disable Phase 5 context-augmented generation
+  enabled: true
+  # Number of chunks to retrieve before each similar chunk
+  chunks:
+    before: 2
+    after: 2
+  # Maximum number of similar chunks to retrieve
+  max:
+    similar: 5
+    groups: 3
+    total:
+      chunks: 20
+  # Minimum similarity threshold for chunk retrieval (0.0 to 1.0)
+  similarity:
+    threshold: 0.3
+  # Prompt length management
+  prompt:
+    max:
+      length: 4000
+  # Enable truncation for long contexts
+  truncation:
+    enabled: true
+
 # Logging Configuration
 logging:
   level:

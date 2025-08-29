@@ -5,7 +5,7 @@ import com.agenttimeline.model.OllamaResponse;
 import com.agenttimeline.repository.MessageRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -22,12 +22,24 @@ public class TimelineService {
     private final MessageChainValidator chainValidator;
     private final VectorStoreService vectorStoreService;
 
+    // Phase 5: Context-Augmented Generation Services
+    private final ContextRetrievalService contextRetrievalService;
+    private final ChunkGroupManager chunkGroupManager;
+    private final EnhancedOllamaService enhancedOllamaService;
+
+    // Phase 5 Configuration
+    @Value("${context.enabled:true}")
+    private boolean contextEnabled;
+
     /**
-     * Process user message with message chaining
+     * Process user message with message chaining and Phase 5 context augmentation
      * 1. Save user message with parent reference
-     * 2. Get AI response
-     * 3. Save assistant message with user message as parent
-     * 4. Return the assistant message
+     * 2. Process for vector storage (async)
+     * 3. Retrieve relevant context chunks (Phase 5)
+     * 4. Group and merge context chunks (Phase 5)
+     * 5. Generate enhanced AI response with context (Phase 5)
+     * 6. Save assistant message with user message as parent
+     * 7. Return the assistant message
      */
     public Mono<Message> processUserMessage(String userMessage, String sessionId) {
         // Capture user message timestamp immediately when it arrives
@@ -45,6 +57,88 @@ public class TimelineService {
         // Process user message for vector storage (async to avoid blocking)
         processMessageForVectorStorage(savedUserMessage.getId(), userMessage, sessionId);
 
+        // Phase 5: Context-Augmented Generation
+        if (contextEnabled) {
+            log.debug("Phase 5 enabled: Retrieving context for enhanced response generation");
+            return generateEnhancedResponse(userMessage, sessionId, savedUserMessage, userMessageTimestamp);
+        } else {
+            log.debug("Phase 5 disabled: Using basic response generation");
+            return generateBasicResponse(userMessage, sessionId, savedUserMessage, userMessageTimestamp);
+        }
+    }
+
+    /**
+     * Generate enhanced response with context augmentation (Phase 5).
+     */
+    private Mono<Message> generateEnhancedResponse(String userMessage, String sessionId,
+                                                 Message savedUserMessage, LocalDateTime userMessageTimestamp) {
+        try {
+            // Step 3: Retrieve relevant context chunks
+            List<ContextRetrievalService.ExpandedChunkGroup> expandedGroups =
+                contextRetrievalService.retrieveContext(userMessage, sessionId);
+
+            if (expandedGroups.isEmpty()) {
+                log.debug("No context retrieved, falling back to basic response for session {}", sessionId);
+                return generateBasicResponse(userMessage, sessionId, savedUserMessage, userMessageTimestamp);
+            }
+
+            log.debug("Retrieved {} expanded chunk groups for context augmentation", expandedGroups.size());
+
+            // Step 4: Group and merge overlapping chunks
+            List<ChunkGroupManager.ContextChunkGroup> contextGroups =
+                chunkGroupManager.mergeOverlappingGroups(expandedGroups);
+
+            log.debug("Merged into {} final context groups with {} total chunks",
+                contextGroups.size(),
+                contextGroups.stream().mapToInt(ChunkGroupManager.ContextChunkGroup::getTotalChunks).sum());
+
+            // Step 5: Generate enhanced AI response with context
+            return enhancedOllamaService.generateResponseWithContext(userMessage, contextGroups, sessionId)
+                    .map(ollamaResponse -> {
+                        // Capture assistant message timestamp when response arrives
+                        LocalDateTime assistantMessageTimestamp = LocalDateTime.now();
+                        long responseTime = java.time.Duration.between(userMessageTimestamp, assistantMessageTimestamp).toMillis();
+
+                        // Create assistant message with timestamp from when response arrived
+                        Message assistantMessage = createAssistantMessage(
+                            ollamaResponse.getResponse(),
+                            sessionId,
+                            savedUserMessage.getId(),
+                            ollamaResponse.getModel(),
+                            responseTime,
+                            assistantMessageTimestamp
+                        );
+
+                        Message savedAssistantMessage = messageRepository.save(assistantMessage);
+                        log.info("Saved enhanced assistant message with ID: {} at timestamp: {} (nano: {}) (parent: {}, response time: {}ms, context groups: {})",
+                            savedAssistantMessage.getId(), assistantMessage.getTimestamp(),
+                            assistantMessage.getTimestamp().toLocalTime().toNanoOfDay(),
+                            savedUserMessage.getId(), responseTime, contextGroups.size());
+
+                        // Process assistant message for vector storage (async to avoid blocking)
+                        processMessageForVectorStorage(savedAssistantMessage.getId(),
+                            ollamaResponse.getResponse(), sessionId);
+
+                        return savedAssistantMessage;
+                    })
+                    .doOnError(error -> {
+                        log.error("Error in enhanced response generation for session {}: {}, falling back to basic response",
+                            sessionId, error.getMessage());
+                        // Could implement fallback to basic response here if needed
+                    });
+
+        } catch (Exception e) {
+            log.error("Phase 5 context retrieval failed for session {}, falling back to basic response: {}",
+                sessionId, e.getMessage(), e);
+            return generateBasicResponse(userMessage, sessionId, savedUserMessage, userMessageTimestamp);
+        }
+    }
+
+    /**
+     * Generate basic response without context augmentation (fallback method).
+     */
+    private Mono<Message> generateBasicResponse(String userMessage, String sessionId,
+                                              Message savedUserMessage, LocalDateTime userMessageTimestamp) {
         return ollamaService.generateResponse(userMessage)
                 .map(ollamaResponse -> {
                     // Capture assistant message timestamp when response arrives
@@ -62,7 +156,7 @@ public class TimelineService {
                     );
 
                     Message savedAssistantMessage = messageRepository.save(assistantMessage);
-                    log.info("Saved assistant message with ID: {} at timestamp: {} (nano: {}) (parent: {}, response time: {}ms)",
+                    log.info("Saved basic assistant message with ID: {} at timestamp: {} (nano: {}) (parent: {}, response time: {}ms)",
                         savedAssistantMessage.getId(), assistantMessage.getTimestamp(),
                         assistantMessage.getTimestamp().toLocalTime().toNanoOfDay(), savedUserMessage.getId(), responseTime);
 

@@ -217,10 +217,300 @@ A new minimalist chat interface has been created in `/scripts/chat/` with the fo
 .\scripts\chat\chat.bat
 ```
 
+## Phase 5: Context-Augmented Generation with Surrounding Chunks - IN PLANNING
+
+Phase 5 will implement truly augmented generation by retrieving similar chunks AND their surrounding context, then injecting this information as conversation history before sending the user message to the LLM.
+
+### Phase 5 Core Concept
+
+The goal is to enhance the assistant's responses by providing relevant conversation context without requiring the entire chat history to be sent with each request. Instead of naive conversation history (which can be expensive and hit context limits), we'll:
+
+1. **Retrieve Similar Chunks** - Use vector similarity search to find chunks most relevant to the user's current message
+2. **Expand Context** - For each retrieved chunk, get X chunks before and X chunks after from the same original message
+3. **Smart Grouping** - Group related chunks together and merge overlapping groups to avoid duplicates
+4. **Context Injection** - Insert these chunk groups as conversation history at the beginning of the user prompt
+5. **Enhanced Responses** - Send the context-enriched prompt to the LLM for more informed responses
+
+### Phase 5 Implementation Steps
+
+#### 1. Enhanced Context Retrieval Service
+- **New Service**: `ContextRetrievalService`
+- **Functionality**:
+  - Accept user message and session ID
+  - Generate embedding for the user message
+  - Retrieve top N similar chunks using existing `VectorStoreService.findSimilarChunks()`
+  - For each retrieved chunk, get X chunks before and X chunks after from the same message
+  - Return expanded context chunks grouped by their original message
+
+#### 2. Chunk Grouping and Merging Logic
+- **New Component**: `ChunkGroupManager`
+- **Functionality**:
+  - Group chunks by their original message ID
+  - Sort chunks within each group by chunk index
+  - Detect overlapping chunk groups from different messages
+  - Merge overlapping groups using intelligent joining logic:
+    - Compare chunk sequences for overlap detection
+    - Join groups at overlapping points
+    - Remove duplicate chunks while preserving chronological order
+    - Handle edge cases (adjacent groups, nested overlaps)
+
+#### 3. Context-Enhanced Prompt Construction
+- **Enhanced Service**: Modify `OllamaService` or create `EnhancedOllamaService`
+- **Functionality**:
+  - Accept user message + context chunk groups
+  - Construct enhanced prompt with format:
+    ```
+    Previous relevant conversation context:
+    [Group 1 chunks in chronological order]
+    [Group 2 chunks in chronological order]
+    ...
+
+    Current user message: [user input]
+    ```
+  - Ensure total prompt length stays within model context limits
+  - Implement truncation strategies for very long contexts
+
+#### 4. Integration with Chat Endpoint
+- **Modify**: `TimelineService.processUserMessage()`
+- **New Flow**:
+  1. Save user message (existing)
+  2. Process for vector storage (existing, async)
+  3. **NEW**: Retrieve relevant context chunks using `ContextRetrievalService`
+  4. **NEW**: Group and merge chunks using `ChunkGroupManager`
+  5. **NEW**: Generate enhanced prompt with context
+  6. **NEW**: Send enhanced prompt to LLM instead of raw user message
+  7. Save assistant response (existing)
+
+#### 5. Configuration and Tuning
+- **Configuration Parameters**:
+  - `context.chunks.before`: Number of chunks to retrieve before each similar chunk (default: 2)
+  - `context.chunks.after`: Number of chunks to retrieve after each similar chunk (default: 2)
+  - `context.max.groups`: Maximum number of chunk groups to include (default: 3)
+  - `context.max.total.chunks`: Maximum total chunks across all groups (default: 20)
+  - `context.similarity.threshold`: Minimum similarity score for chunk retrieval (default: 0.3)
+
+#### 6. Testing and Validation
+- **Test Scenarios**:
+  - Unique information recall (e.g., "My name is Alidibeeda" → assistant should remember name)
+  - Multi-turn context preservation
+  - Overlapping chunk group merging
+  - Context window limit handling
+  - Performance impact on response times
+
+### Phase 5 Technical Implementation Details
+
+#### Context Retrieval Algorithm
+```java
+// Pseudocode for context retrieval
+List<MessageChunkEmbedding> retrieveContext(String userMessage, String sessionId) {
+    // 1. Find similar chunks
+    List<MessageChunkEmbedding> similarChunks = vectorStoreService.findSimilarChunks(
+        userMessage, sessionId, maxSimilarChunks);
+
+    // 2. Expand each chunk with surrounding context
+    Set<ExpandedChunkGroup> expandedGroups = new HashSet<>();
+    for (MessageChunkEmbedding chunk : similarChunks) {
+        List<MessageChunkEmbedding> surroundingChunks = getSurroundingChunks(
+            chunk.getMessageId(), chunk.getChunkIndex(), chunksBefore, chunksAfter);
+        expandedGroups.add(new ExpandedChunkGroup(chunk.getMessageId(), surroundingChunks));
+    }
+
+    // 3. Merge overlapping groups
+    return mergeOverlappingGroups(expandedGroups);
+}
+```
+
+#### Chunk Group Merging Strategy
+- **Overlap Detection**: Compare chunk sequences between groups
+- **Merging Logic**: Join at overlapping points, preserving chronological order
+- **Duplicate Removal**: Use chunk index and content comparison
+- **Ordering**: Maintain message timestamp and chunk index ordering
+
+#### Prompt Enhancement Strategy
+- **Context Formatting**: Present chunks as natural conversation flow
+- **Length Management**: Implement sliding window or priority-based truncation
+- **Quality Filtering**: Prefer more recent and highly similar chunks
+- **Fallback Behavior**: Graceful degradation when context is too long
+
+### Phase 5 Expected Outcomes
+
+#### Functional Improvements
+- **Context Awareness**: Assistant remembers user-provided information across turns
+- **Reduced Hallucination**: More accurate responses based on actual conversation history
+- **Efficient Context Usage**: Better context utilization compared to full history approach
+
+#### Performance Characteristics
+- **Response Time**: Minimal impact (<100ms additional processing)
+- **Context Efficiency**: Use only relevant chunks instead of entire history
+- **Scalability**: Handle sessions with thousands of messages efficiently
+
+#### Quality Metrics
+- **Context Recall**: Percentage of relevant information successfully retrieved
+- **Response Accuracy**: Improvement in factually correct responses
+- **User Experience**: More coherent and contextually appropriate conversations
+
+### Phase 5 Implementation Checklist
+
+- [x] Create `ContextRetrievalService` for expanded chunk retrieval
+- [x] Implement `ChunkGroupManager` for intelligent grouping and merging
+- [x] Enhance `OllamaService` or create `EnhancedOllamaService` for context injection
+- [x] Modify `TimelineService.processUserMessage()` to use context retrieval
+- [x] Add configuration parameters for context retrieval tuning
+- [x] Implement context window management and truncation strategies
+- [x] Create comprehensive tests for context retrieval scenarios
+- [ ] Add performance monitoring and metrics
+- [ ] Update API documentation with new context-enhanced behavior
+- [ ] Test with real conversation scenarios for quality validation
+
 ### Current System Status
 
 **Vector Similarity Search**: ✅ **WORKING** - Successfully retrieves relevant conversation chunks
-**Assistant Response Enhancement**: ❌ **NOT YET IMPLEMENTED** - Retrieved context is not yet integrated into AI responses
+**Context Retrieval**: ⚠️ **IMPLEMENTED BUT WITH ISSUES** - Enhanced context retrieval has chunking and formatting problems
+**Assistant Response Enhancement**: ⚠️ **IMPLEMENTED BUT WITH ISSUES** - Context integration works but has data corruption issues
 
-The system successfully extracts and retrieves relevant knowledge through vector similarity search, but the assistant responses are not yet enhanced with the retrieved context. This represents the next development step for truly augmented generation capabilities.
+### Phase 5 Implementation Summary
+
+#### ✅ **Core Services Created**
+- **`ContextRetrievalService`**: Retrieves similar chunks with configurable surrounding context (X before/after)
+- **`ChunkGroupManager`**: Intelligently merges overlapping chunk groups while preserving chronological order
+- **`EnhancedOllamaService`**: Constructs context-enriched prompts with truncation and length management
+
+#### ✅ **Integration Complete**
+- **TimelineService Enhanced**: Modified `processUserMessage()` to use Phase 5 context retrieval pipeline
+- **Configuration Added**: Comprehensive tuning parameters for context behavior
+- **Fallback Support**: Graceful degradation to basic responses when context retrieval fails
+
+#### ⚠️ **Critical Issues Identified from Testing**
+
+##### **Issue 1: Chunk Text Truncation**
+- **Problem**: LLM receives "hat did I say my name was?" instead of "What did I say my name was?"
+- **Impact**: First character 'W' is being lost somewhere in the pipeline
+- **Suspected Location**: Chunking process, database storage, or context formatting
+
+##### **Issue 2: Adjacent Chunk Retrieval Failure**
+- **Problem**: Name "Alibideeba" is split across chunks, only "my name is Ali" retrieved
+- **Impact**: Multi-chunk content is not being properly reconstructed
+- **Suspected Location**: Chunk boundary detection or adjacent chunk retrieval logic
+
+##### **Issue 3: Single Chunk Retrieval Works**
+- **Problem**: "I live in New York City" works correctly (fits in one chunk)
+- **Impact**: Confirms issue is specific to multi-chunk content
+- **Root Cause**: Chunking algorithm breaking content at suboptimal boundaries
+
+#### 🔍 **Debugging Steps**
+
+##### **✅ Step 1: Enable Detailed Logging**
+Add to `application.yml`:
+```yaml
+logging:
+  level:
+    com.agenttimeline.service.ChunkingService: DEBUG
+    com.agenttimeline.service.ContextRetrievalService: DEBUG
+    com.agenttimeline.service.EnhancedOllamaService: DEBUG
+    com.agenttimeline.service.VectorStoreService: DEBUG
+    com.agenttimeline.controller.TimelineController: DEBUG
+```
+
+##### **✅ Step 2: Use Debug Endpoints**
+
+**Debug Context Retrieval Pipeline:**
+```bash
+# Inspect the complete Phase 5 pipeline for a specific session
+curl "http://localhost:8080/api/v1/timeline/debug/context/{sessionId}?userMessage=What%20did%20I%20say%20my%20name%20was%3F"
+```
+
+**Test Chunking Directly:**
+```bash
+# Test how text gets chunked
+curl -X POST http://localhost:8080/api/v1/timeline/debug/chunking \
+  -H "Content-Type: application/json" \
+  -d '{"text": "What did I say my name was? My name is Alibideeba and I live in New York City"}'
+```
+
+**Inspect Database Chunks:**
+```bash
+# View all chunks for a session
+curl http://localhost:8080/api/v1/timeline/debug/chunks/{sessionId}
+```
+
+##### **Step 3: Analyze Debug Output**
+
+**Expected Debug Response Structure:**
+```json
+{
+  "sessionId": "your-session-id",
+  "userMessage": "What did I say my name was?",
+  "expandedGroups": [
+    {
+      "messageId": "msg-uuid",
+      "chunkCount": 3,
+      "combinedText": "What did I say my name was? My name is Ali...",
+      "chunks": [
+        {
+          "id": "chunk-uuid",
+          "index": 0,
+          "text": "What did I say my name was?",
+          "textLength": 27,
+          "hasEmbedding": true
+        }
+      ]
+    }
+  ],
+  "mergedGroups": [...],
+  "enhancedPrompt": "Previous relevant conversation context:\nContext 1:\nFrom conversation: msg-uuid\n• What did I say my name was?\n• My name is Ali...\n\nCurrent user message: What did I say my name was?",
+  "configuration": {
+    "chunksBefore": 2,
+    "chunksAfter": 2,
+    "maxSimilarChunks": 5
+  }
+}
+```
+
+##### **Step 4: Identify Issues**
+
+**If you see "hat did I say my name was?":**
+- ❌ **Issue**: First character 'W' is truncated
+- 🔍 **Check**: Chunk storage/retrieval in database
+- 🔧 **Fix**: Examine MessageChunkEmbedding entity and JSON serialization
+
+**If you see incomplete names:**
+- ❌ **Issue**: Multi-chunk content not reconstructed properly
+- 🔍 **Check**: Chunking boundaries and adjacent chunk retrieval
+- 🔧 **Fix**: Improve chunking algorithm to preserve word boundaries
+
+**If single chunks work but multi-chunk fails:**
+- ❌ **Issue**: Adjacent chunk retrieval logic
+- 🔍 **Check**: ContextRetrievalService.getSurroundingChunks()
+- 🔧 **Fix**: Verify chunk index calculation and database queries
+
+#### 🛠️ **Immediate Fixes Required**
+
+##### **Fix 1: Chunking Boundary Detection**
+The current chunking algorithm may be breaking at suboptimal points. Update `ChunkingService.calculateChunkEnd()` to:
+- Preserve complete words and names
+- Avoid breaking at the beginning of important content
+- Add minimum chunk size enforcement
+
+##### **Fix 2: Context Formatting**
+Review `EnhancedOllamaService.formatContextGroup()` for:
+- Potential string truncation issues
+- Encoding problems
+- Buffer management issues
+
+##### **Fix 3: Adjacent Chunk Retrieval**
+Verify `ContextRetrievalService.getSurroundingChunks()`:
+- Correct chunk index calculation
+- Proper sorting of chunks
+- Database query correctness
+
+#### 📋 **Next Steps**
+
+1. **Immediate**: Implement debug endpoint and detailed logging
+2. **Short-term**: Fix chunking boundary detection algorithm
+3. **Short-term**: Add comprehensive chunking tests with edge cases
+4. **Medium-term**: Add performance monitoring and metrics
+5. **Medium-term**: Implement chunk validation and repair mechanisms
+6. **Long-term**: Add ML-based chunk boundary optimization
+
+The core Phase 5 architecture is sound, but requires these specific fixes to resolve the data corruption and retrieval issues.
 
