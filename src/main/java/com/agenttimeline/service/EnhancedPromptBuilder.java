@@ -154,6 +154,15 @@ public class EnhancedPromptBuilder {
         }
 
         try {
+            // Build debug section showing retrieved chunks
+            StringBuilder debugSection = new StringBuilder();
+            debugSection.append("DEBUG - RETRIEVED CHUNKS:\n");
+            for (int i = 0; i < chunks.size(); i++) {
+                ConfigurableContextRetrievalService.ExpandedChunkGroup group = chunks.get(i);
+                debugSection.append(String.format("Chunk Group %d (Message: %s):\n", i + 1, group.getMessageId()));
+                debugSection.append(group.getCombinedText()).append("\n\n");
+            }
+
             // Use LLM to extract key information from all chunks
             StringBuilder allChunksText = new StringBuilder();
             for (ConfigurableContextRetrievalService.ExpandedChunkGroup group : chunks) {
@@ -164,7 +173,7 @@ public class EnhancedPromptBuilder {
             }
 
             if (allChunksText.length() == 0) {
-                return "";
+                return debugSection.toString() + "No meaningful chunk content found.";
             }
 
             // Extract key information using LLM
@@ -172,7 +181,7 @@ public class EnhancedPromptBuilder {
 
             if (extractedInfo != null && !extractedInfo.trim().isEmpty()) {
                 log.debug("LLM extracted information for session {}: {}", sessionId, extractedInfo);
-                return extractedInfo;
+                return debugSection.toString() + "EXTRACTED SUMMARY:\n" + extractedInfo;
             }
 
         } catch (Exception e) {
@@ -180,7 +189,7 @@ public class EnhancedPromptBuilder {
         }
 
         // Fallback to basic summary if LLM extraction fails
-        return "I recall some details from our previous conversation.";
+        return "Some details from previous conversations were found.";
     }
 
     /**
@@ -189,14 +198,14 @@ public class EnhancedPromptBuilder {
     private String extractKeyInformationWithLLM(String text, String sessionId) {
         try {
             String extractionPrompt = String.format(
-                "You are an expert information extraction assistant. Analyze the following conversation text and create a brief, natural summary from the assistant's perspective that captures the most important information a user might want to remember.\n\n" +
+                "You are an expert information extraction assistant. Analyze the following conversation text and create a brief, factual summary of the most important information learned about the user.\n\n" +
                 "CONVERSATION TEXT:\n%s\n\n" +
                 "INSTRUCTIONS:\n" +
-                "- Focus on personal information (names, locations, occupations)\n" +
-                "- Include important facts or preferences mentioned\n" +
-                "- Write in first person as if the assistant is recalling the information\n" +
+                "- Focus on personal information (names, locations, occupations, preferences)\n" +
+                "- Include specific facts, details, and context\n" +
+                "- Write in a neutral, factual style\n" +
                 "- Keep it concise (1-2 sentences)\n" +
-                "- Use natural, conversational language\n" +
+                "- Use direct, clear language\n" +
                 "- If no important information is found, respond with an empty string\n\n" +
                 "SUMMARY:",
                 text
@@ -224,9 +233,15 @@ public class EnhancedPromptBuilder {
                     return "";
                 }
 
-                // Ensure it starts with "I" to make it first person
-                if (!extracted.toLowerCase().startsWith("i ")) {
-                    extracted = "I " + extracted.substring(0, 1).toLowerCase() + extracted.substring(1);
+                // Clean up any unwanted prefixes that might have been added
+                extracted = extracted.trim();
+                if (extracted.toLowerCase().startsWith("the user ")) {
+                    extracted = extracted.substring(8);
+                    extracted = extracted.substring(0, 1).toUpperCase() + extracted.substring(1);
+                }
+                if (extracted.toLowerCase().startsWith("you ")) {
+                    extracted = extracted.substring(4);
+                    extracted = extracted.substring(0, 1).toUpperCase() + extracted.substring(1);
                 }
 
                 return extracted;

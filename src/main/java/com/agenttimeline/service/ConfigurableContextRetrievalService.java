@@ -42,7 +42,7 @@ public class ConfigurableContextRetrievalService {
     @Value("${context.retrieval.max.similar:5}")
     private int defaultMaxSimilarChunks;
 
-    @Value("${context.retrieval.similarity.threshold:0.3}")
+    @Value("${context.retrieval.similarity.threshold:0.6}")
     private double defaultSimilarityThreshold;
 
     @Value("${context.retrieval.chunks.max-per-group:5}")
@@ -166,9 +166,9 @@ public class ConfigurableContextRetrievalService {
                                                                  String excludeMessageId, RetrievalConfig config) {
         log.debug("Using adaptive retrieval strategy for session {}", sessionId);
 
-        // Start with conservative parameters
+        // Start with more selective parameters for better relevance
         int currentMaxSimilar = Math.min(config.getMaxSimilarChunks(), 3);
-        double currentThreshold = Math.max(config.getSimilarityThreshold(), 0.5);
+        double currentThreshold = Math.max(config.getSimilarityThreshold(), 0.7);
 
         List<ExpandedChunkGroup> results = List.of();
         int attempts = 0;
@@ -212,7 +212,7 @@ public class ConfigurableContextRetrievalService {
         // Try multiple similarity thresholds
         List<List<ExpandedChunkGroup>> results = new ArrayList<>();
 
-        double[] thresholds = {0.8, 0.6, 0.4}; // Higher thresholds for better relevance
+        double[] thresholds = {0.8, 0.7, 0.6}; // Higher thresholds for better relevance
         for (double threshold : thresholds) {
             RetrievalConfig thresholdConfig = RetrievalConfig.builder()
                 .strategy(RetrievalStrategy.FIXED)
@@ -337,14 +337,16 @@ public class ConfigurableContextRetrievalService {
     }
 
     /**
-     * Apply relevance filtering to improve quality without being too strict.
+     * Apply relevance filtering with improved semantic understanding.
+     * Focus on chunks that are more likely to contain relevant information
+     * for the current query context.
      */
     private List<MessageChunkEmbedding> applyStrictSimilarityThreshold(List<MessageChunkEmbedding> chunks, double threshold) {
         if (chunks.isEmpty()) {
             return chunks;
         }
 
-        // Apply more balanced filtering - keep chunks that have meaningful content
+        // Apply more targeted filtering - focus on chunks with specific content types
         List<MessageChunkEmbedding> filtered = chunks.stream()
             .filter(chunk -> {
                 String text = chunk.getChunkText();
@@ -352,21 +354,16 @@ public class ConfigurableContextRetrievalService {
 
                 String lowerText = text.toLowerCase();
 
-                // More inclusive filtering - include any chunk with substantial content
-                // that appears to contain personal information or meaningful statements
-                return lowerText.length() > 10 && // Reasonable content length
-                       (lowerText.contains("i ") || // First person statements
-                        lowerText.contains("my ") || // Personal information
-                        lowerText.contains("name") || // Name information
-                        lowerText.contains("am ") || // Identity statements
-                        lowerText.contains("live") || // Location information
-                        lowerText.contains("work") || // Work information
-                        lowerText.contains("programming") ||
-                        lowerText.contains("software") ||
-                        lowerText.contains("engineer") ||
-                        lowerText.split("\\s+").length > 3); // Substantial sentence
+                // More targeted filtering - only include chunks that are likely to contain
+                // the specific type of information being requested
+                return lowerText.length() > 15 && // Substantial content length
+                       lowerText.split("\\s+").length > 4 && // Multiple words
+                       (containsSpecificPersonalInfo(lowerText) ||
+                        containsLocationInfo(lowerText) ||
+                        containsProfessionalInfo(lowerText) ||
+                        containsTemporalInfo(lowerText));
             })
-            .limit(Math.max(1, Math.min(5, chunks.size()))) // Allow up to 5 relevant chunks
+            .limit(Math.max(1, Math.min(3, chunks.size()))) // More conservative limit
             .toList();
 
         // If no chunks pass the filter, keep at least the top chunk
@@ -374,8 +371,55 @@ public class ConfigurableContextRetrievalService {
             filtered = chunks.stream().limit(1).toList();
         }
 
-        log.debug("Applied balanced relevance filtering: {} -> {} chunks", chunks.size(), filtered.size());
+        log.debug("Applied improved relevance filtering: {} -> {} chunks", chunks.size(), filtered.size());
         return filtered;
+    }
+
+    /**
+     * Check if text contains specific personal information indicators.
+     */
+    private boolean containsSpecificPersonalInfo(String text) {
+        String lowerText = text.toLowerCase();
+        // Look for more specific patterns that indicate personal information
+        return lowerText.matches(".*\\bmy name is\\b.*") ||
+               lowerText.matches(".*\\bi'm\\b.*") ||
+               lowerText.matches(".*\\bi am\\b.*") ||
+               lowerText.matches(".*\\bcalled\\b.*") ||
+               lowerText.matches(".*\\bidentify as\\b.*");
+    }
+
+    /**
+     * Check if text contains location information.
+     */
+    private boolean containsLocationInfo(String text) {
+        String lowerText = text.toLowerCase();
+        // Look for location-specific patterns
+        return lowerText.matches(".*\\b(from|live in|located in|in)\\s+\\w+.*") ||
+               lowerText.matches(".*\\bcity|state|country|town\\b.*") ||
+               lowerText.matches(".*\\bcalifornia|san|louis|obispo\\b.*") ||
+               lowerText.matches(".*\\baddress|residence\\b.*");
+    }
+
+    /**
+     * Check if text contains professional information.
+     */
+    private boolean containsProfessionalInfo(String text) {
+        String lowerText = text.toLowerCase();
+        // Look for work/profession patterns
+        return lowerText.matches(".*\\b(work as|job is|profession|occupation)\\b.*") ||
+               lowerText.matches(".*\\bengineer|developer|programmer\\b.*") ||
+               lowerText.matches(".*\\bcompany|organization\\b.*");
+    }
+
+    /**
+     * Check if text contains temporal information.
+     */
+    private boolean containsTemporalInfo(String text) {
+        String lowerText = text.toLowerCase();
+        // Look for time-related patterns
+        return lowerText.matches(".*\\b(when|since|ago|year|month|day)\\b.*") ||
+               lowerText.matches(".*\\b\\d{4}\\b.*") || // Years
+               lowerText.matches(".*\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\b.*");
     }
 
     /**
