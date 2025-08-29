@@ -11,6 +11,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +31,9 @@ public class TimelineService {
     // Phase 5 Configuration
     @Value("${context.enabled:true}")
     private boolean contextEnabled;
+
+    // Store last enhanced prompt for debugging
+    private final Map<String, String> lastEnhancedPrompts = new ConcurrentHashMap<>();
 
     /**
      * Process user message with message chaining and Phase 5 context augmentation
@@ -94,6 +98,16 @@ public class TimelineService {
 
             // Step 5: Generate enhanced AI response with context
             return enhancedOllamaService.generateResponseWithContext(userMessage, contextGroups, sessionId)
+                    .doOnNext(ollamaResponse -> {
+                        // Store the enhanced prompt for debugging
+                        try {
+                            String prompt = enhancedOllamaService.constructEnhancedPrompt(userMessage, contextGroups);
+                            lastEnhancedPrompts.put(sessionId, prompt);
+                            log.debug("Stored enhanced prompt for session {}: {} chars", sessionId, prompt.length());
+                        } catch (Exception e) {
+                            log.warn("Could not store enhanced prompt for debugging: {}", e.getMessage());
+                        }
+                    })
                     .map(ollamaResponse -> {
                         // Capture assistant message timestamp when response arrives
                         LocalDateTime assistantMessageTimestamp = LocalDateTime.now();
@@ -575,5 +589,20 @@ public class TimelineService {
                 e.printStackTrace();
             }
         }, "VectorProcessor-" + messageId).start();
+    }
+
+    /**
+     * Get the last enhanced prompt used for a session (for debugging)
+     */
+    public Mono<String> getLastEnhancedPrompt(String sessionId) {
+        return Mono.fromCallable(() -> {
+            String prompt = lastEnhancedPrompts.get(sessionId);
+            if (prompt == null) {
+                log.debug("No enhanced prompt found for session {}", sessionId);
+                return "";
+            }
+            log.debug("Retrieved enhanced prompt for session {}: {} chars", sessionId, prompt.length());
+            return prompt;
+        });
     }
 }

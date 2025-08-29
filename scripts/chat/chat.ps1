@@ -1,6 +1,7 @@
 param(
     [string]$SessionId = "default",
-    [switch]$NoPause
+    [switch]$NoPause,
+    [switch]$ShowPrompt
 )
 
 # Configuration
@@ -30,6 +31,9 @@ try {
 
 Write-Host "Session ID: $SessionId" -ForegroundColor Gray
 Write-Host "Type 'quit' or 'exit' to end the conversation" -ForegroundColor Gray
+if ($ShowPrompt) {
+    Write-Host "Show LLM Prompt: Enabled" -ForegroundColor Yellow
+}
 Write-Host ""
 
 # Main chat loop
@@ -56,13 +60,40 @@ while ($true) {
             "message" = $userInput
         } | ConvertTo-Json
 
+        # Build query parameters
+        $queryParams = "sessionId=$SessionId"
+        if ($ShowPrompt) {
+            $queryParams += "&includePrompt=true"
+        }
+
         # Send request to API
-        $response = Invoke-RestMethod -Uri "$chatEndpoint`?sessionId=$SessionId" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 30
+        $response = Invoke-RestMethod -Uri "$chatEndpoint`?$queryParams" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 30
 
         # Display assistant response
-        if ($response -and $response.content) {
-            Write-Host "Assistant: " -NoNewline -ForegroundColor Green
-            Write-Host $response.content
+        if ($response) {
+            if ($response.content) {
+                # Standard response format (no prompt requested)
+                Write-Host "Assistant: " -NoNewline -ForegroundColor Green
+                Write-Host $response.content
+            } elseif ($response.message -and $response.message.content) {
+                # Debug response format with prompt (includePrompt=true)
+                Write-Host "Assistant: " -NoNewline -ForegroundColor Green
+                Write-Host $response.message.content
+
+                if ($ShowPrompt -and $response.enhancedPrompt -and $response.enhancedPrompt.Length -gt 0) {
+                    Write-Host ""
+                    Write-Host "--- LLM PROMPT SENT ---" -ForegroundColor Magenta
+                    Write-Host $response.enhancedPrompt -ForegroundColor Gray
+                    Write-Host "--- END PROMPT ---" -ForegroundColor Magenta
+                    Write-Host "Prompt Length: $($response.promptLength) characters, $($response.wordCount) words" -ForegroundColor DarkGray
+                } elseif ($ShowPrompt) {
+                    Write-Host ""
+                    Write-Host "--- No Context Retrieved ---" -ForegroundColor DarkGray
+                }
+            } else {
+                Write-Host "Assistant: " -NoNewline -ForegroundColor Green
+                Write-Host "(No response)" -ForegroundColor Gray
+            }
         } else {
             Write-Host "Assistant: " -NoNewline -ForegroundColor Green
             Write-Host "(No response)" -ForegroundColor Gray

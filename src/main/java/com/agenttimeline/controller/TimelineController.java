@@ -36,21 +36,39 @@ public class TimelineController {
     /**
      * Chat endpoint with message chaining
      * Stores user message and assistant response separately with proper parent-child relationships
+     * Optionally includes the enhanced prompt sent to LLM for debugging
      */
     @PostMapping("/chat")
-    public Mono<ResponseEntity<Message>> chat(
+    public Mono<ResponseEntity<?>> chat(
             @RequestBody Map<String, String> request,
-            @RequestParam(defaultValue = "default") String sessionId) {
+            @RequestParam(defaultValue = "default") String sessionId,
+            @RequestParam(defaultValue = "false") boolean includePrompt) {
 
         String userMessage = request.get("message");
         if (userMessage == null || userMessage.trim().isEmpty()) {
             return Mono.just(ResponseEntity.badRequest().build());
         }
 
-        log.info("Processing chat request for session: {} with message chaining", sessionId);
+        log.info("Processing chat request for session: {} with message: '{}', includePrompt: {}", sessionId, userMessage, includePrompt);
 
         return timelineService.processUserMessage(userMessage, sessionId)
-                .map(message -> ResponseEntity.ok(message))
+                .flatMap(message -> {
+                    if (includePrompt) {
+                        // For debugging: also return the prompt that was sent to LLM
+                        return timelineService.getLastEnhancedPrompt(sessionId)
+                                .map(prompt -> {
+                                    Map<String, Object> debugResponse = new HashMap<>();
+                                    debugResponse.put("message", message);
+                                    debugResponse.put("enhancedPrompt", prompt);
+                                    debugResponse.put("promptLength", prompt.length());
+                                    debugResponse.put("wordCount", prompt.split("\\s+").length);
+                                    return ResponseEntity.ok((Object)debugResponse);
+                                })
+                                .defaultIfEmpty(ResponseEntity.ok((Object)message));
+                    } else {
+                        return Mono.just(ResponseEntity.ok(message));
+                    }
+                })
                 .doOnError(error -> log.error("Error processing chat request", error))
                 .onErrorResume(error -> Mono.just(ResponseEntity.internalServerError().build()));
     }
@@ -590,13 +608,12 @@ public class TimelineController {
 
         } catch (Exception e) {
             log.error("Error in debug context retrieval for session {}: {}", sessionId, e.getMessage(), e);
-            Map<String, Object> errorInfo = Map.of(
-                "error", e.getMessage(),
-                "errorType", e.getClass().getSimpleName(),
-                "sessionId", sessionId,
-                "userMessage", userMessage,
-                "timestamp", java.time.LocalDateTime.now().toString()
-            );
+            Map<String, Object> errorInfo = new HashMap<>();
+            errorInfo.put("error", e.getMessage() != null ? e.getMessage() : "Unknown error");
+            errorInfo.put("errorType", e.getClass().getSimpleName());
+            errorInfo.put("sessionId", sessionId);
+            errorInfo.put("userMessage", userMessage);
+            errorInfo.put("timestamp", java.time.LocalDateTime.now().toString());
             return ResponseEntity.internalServerError().body(errorInfo);
         }
     }
@@ -614,8 +631,8 @@ public class TimelineController {
 
             log.info("Debug chunking test for text: '{}'", text.substring(0, Math.min(50, text.length())));
 
-            // Test different chunking methods
-            ChunkingService chunkingService = new ChunkingService();
+            // Get the chunking service from vector store service
+            ChunkingService chunkingService = vectorStoreService.getChunkingService();
 
             List<String> chunksNoOverlap = chunkingService.chunkText(text);
             List<String> chunksWithOverlap = chunkingService.chunkTextWithOverlap(text);

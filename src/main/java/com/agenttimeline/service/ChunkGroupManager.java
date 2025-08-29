@@ -207,15 +207,17 @@ public class ChunkGroupManager {
                 .thenComparing(MessageChunkEmbedding::getChunkIndex))
             .collect(ArrayList::new, (list, chunk) -> list.add(chunk), ArrayList::addAll);
 
-        // Create merged group - use the message ID from the earliest group
-        String mergedMessageId = groupsToMerge.stream()
+        // Create merged group - use the message ID and role from the earliest group
+        ContextChunkGroup earliestGroup = groupsToMerge.stream()
             .min(Comparator.comparing(
                 (ContextChunkGroup g) -> g.getEarliestTimestamp() != null ? g.getEarliestTimestamp() : new Date(Long.MAX_VALUE),
                 Comparator.nullsFirst(Comparator.naturalOrder())))
-            .map(ContextChunkGroup::getMessageId)
-            .orElse("merged-group");
+            .orElse(groupsToMerge.get(0));
 
-        return new ContextChunkGroup(mergedMessageId, sortedChunks, earliestTimestamp, latestTimestamp);
+        String mergedMessageId = earliestGroup.getMessageId();
+        Message.Role mergedRole = earliestGroup.getRole();
+
+        return new ContextChunkGroup(mergedMessageId, sortedChunks, earliestTimestamp, latestTimestamp, mergedRole);
     }
 
     /**
@@ -238,7 +240,8 @@ public class ChunkGroupManager {
                 expandedGroup.getMessageId(),
                 expandedGroup.getChunks(),
                 messageTimestamp,
-                messageTimestamp
+                messageTimestamp,
+                message.getRole()
             );
 
         } catch (Exception e) {
@@ -256,13 +259,15 @@ public class ChunkGroupManager {
         private final List<MessageChunkEmbedding> chunks;
         private final Date earliestTimestamp;
         private final Date latestTimestamp;
+        private final Message.Role role;
 
         public ContextChunkGroup(String messageId, List<MessageChunkEmbedding> chunks,
-                               Date earliestTimestamp, Date latestTimestamp) {
+                               Date earliestTimestamp, Date latestTimestamp, Message.Role role) {
             this.messageId = messageId;
             this.chunks = new ArrayList<>(chunks);
             this.earliestTimestamp = earliestTimestamp;
             this.latestTimestamp = latestTimestamp;
+            this.role = role;
         }
 
         public String getMessageId() {
@@ -279,6 +284,10 @@ public class ChunkGroupManager {
 
         public Date getLatestTimestamp() {
             return latestTimestamp;
+        }
+
+        public Message.Role getRole() {
+            return role;
         }
 
         public int getTotalChunks() {

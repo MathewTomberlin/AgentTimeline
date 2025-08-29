@@ -469,6 +469,22 @@ curl http://localhost:8080/api/v1/timeline/debug/chunks/{sessionId}
 }
 ```
 
+**New Format (After Fix):**
+```json
+{
+  "enhancedPrompt": "Past Conversation Context:\nUser: I love programming with Java and Python\nAssistant: That's great to hear! Both Java and Python are popular languages...\n\nRespond to this user message with the past conversation context: What programming languages do I like?",
+  "promptLength": 429,
+  "wordCount": 68
+}
+```
+
+**Key Improvements:**
+- ✅ Clean header: "Past Conversation Context:" 
+- ✅ Role-based: "User:" and "Assistant:" prefixes
+- ✅ No bullets: Removed â¢ symbols
+- ✅ Clear instruction: "Respond to this user message with the past conversation context:"
+- ✅ Chronological order: Messages sorted by timestamp
+
 ##### **Step 4: Identify Issues**
 
 **If you see "hat did I say my name was?":**
@@ -529,9 +545,62 @@ Verify `ContextRetrievalService.getSurroundingChunks()`:
 - No data corruption or character loss
 - Proper chunking for various text lengths
 
+**✅ Issue Resolved: Enhanced Prompt Format**
+- **Problem**: Previous prompt format may have contributed to hallucinations
+- **Solution**: Implemented cleaner, more structured prompt format
+- **New Format Features**:
+  - Clean header: "Past Conversation Context:"
+  - Role-based prefixes: "User:" and "Assistant:"
+  - Removed verbose metadata and bullet points
+  - Clear final instruction for LLM
+  - Chronological message ordering
+- **Result**: Reduced hallucination potential with more structured context presentation
+
+#### 🔧 **Debug Tools Added**
+
+##### **Enhanced Chat Script with Prompt Inspection**
+```bash
+# Enable prompt display in chat
+.\scripts\chat\chat.ps1 -SessionId "debug-session" -ShowPrompt
+
+# Or with batch file
+.\scripts\chat\chat.bat -SessionId "debug-session" -ShowPrompt
+```
+
+##### **Hallucination Test Script**
+```bash
+# Test the specific hallucination scenario
+.\scripts\test-hallucination.ps1
+```
+
+##### **API Endpoint for Prompt Inspection**
+```bash
+# Include prompt in chat response
+curl -X POST http://localhost:8080/api/v1/timeline/chat?sessionId=test&includePrompt=true \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What did I say?"}'
+```
+
+#### 🔍 **Debugging the Hallucination Issue**
+
+**Expected Investigation Steps:**
+1. **Run hallucination test**: `.\scripts\test-hallucination.ps1`
+2. **Inspect prompts**: See exactly what context is sent to LLM
+3. **Analyze prompt format**: Check if instructions are clear enough
+4. **Test prompt variations**: Experiment with different prompt formats
+
+**Potential Fixes:**
+1. **Strengthen prompt instructions**: Make it clearer that LLM should only use provided context
+2. **Add validation**: Reject responses that reference information not in context
+3. **Improve context formatting**: Better structure the context presentation
+4. **Fine-tune LLM parameters**: Adjust temperature, top-p for more factual responses
+
 **🔄 Remaining Tasks (Optional Enhancements):**
 1. **Performance Monitoring**: Add metrics for context retrieval timing
 2. **Advanced Testing**: Test with more complex multi-turn conversations
 3. **Configuration Tuning**: Optimize default parameters based on usage patterns
 4. **Documentation**: Complete API documentation updates
+5. **Hallucination Prevention**: Implement prompt engineering fixes
+
+The system is now ready for testing with full debugging capabilities!
 

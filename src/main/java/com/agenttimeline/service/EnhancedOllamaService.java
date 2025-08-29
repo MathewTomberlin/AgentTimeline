@@ -16,6 +16,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import com.agenttimeline.model.Message;
+
 /**
  * Enhanced Ollama service that constructs context-enriched prompts for augmented generation.
  *
@@ -108,25 +110,26 @@ public class EnhancedOllamaService {
 
         // Add context header if we have context groups
         if (contextGroups != null && !contextGroups.isEmpty()) {
-            promptBuilder.append("Previous relevant conversation context:\n");
+            promptBuilder.append("Past Conversation Context:\n");
 
-            // Process and add context groups
+            // Process and add context groups in chronological order
             List<ChunkGroupManager.ContextChunkGroup> processedGroups =
-                processContextGroups(contextGroups);
+                new ArrayList<>(processContextGroups(contextGroups));
 
-            for (int i = 0; i < processedGroups.size(); i++) {
-                ChunkGroupManager.ContextChunkGroup group = processedGroups.get(i);
+            // Sort by timestamp to maintain conversation order
+            processedGroups.sort(Comparator.comparing(ChunkGroupManager.ContextChunkGroup::getEarliestTimestamp));
 
-                promptBuilder.append("\nContext ").append(i + 1).append(":\n");
+            for (ChunkGroupManager.ContextChunkGroup group : processedGroups) {
+                String rolePrefix = group.getRole() == Message.Role.USER ? "User: " : "Assistant: ";
                 String contextText = formatContextGroup(group);
-                promptBuilder.append(contextText).append("\n");
+                promptBuilder.append(rolePrefix).append(contextText).append("\n");
             }
 
             promptBuilder.append("\n");
         }
 
-        // Add current user message
-        promptBuilder.append("Current user message: ").append(userMessage);
+        // Add current user message with context instruction
+        promptBuilder.append("Respond to this user message with the past conversation context: ").append(userMessage);
 
         String enhancedPrompt = promptBuilder.toString();
 
@@ -152,7 +155,7 @@ public class EnhancedOllamaService {
         // Limit number of groups
         List<ChunkGroupManager.ContextChunkGroup> limitedGroups = contextGroups.stream()
             .limit(maxContextGroups)
-            .toList();
+            .collect(Collectors.toList());
 
         // Check total chunk count and truncate if necessary
         int totalChunks = limitedGroups.stream()
@@ -173,14 +176,11 @@ public class EnhancedOllamaService {
     private String formatContextGroup(ChunkGroupManager.ContextChunkGroup group) {
         StringBuilder formatted = new StringBuilder();
 
-        // Add group metadata
-        formatted.append("From conversation: ").append(group.getMessageId()).append("\n");
-
-        // Add chunk content
+        // Add chunk content without bullet points or metadata
         List<MessageChunkEmbedding> chunks = group.getChunks();
         for (int i = 0; i < chunks.size(); i++) {
             MessageChunkEmbedding chunk = chunks.get(i);
-            formatted.append("• ").append(chunk.getChunkText());
+            formatted.append(chunk.getChunkText());
 
             // Add separator between chunks (except for the last one)
             if (i < chunks.size() - 1) {

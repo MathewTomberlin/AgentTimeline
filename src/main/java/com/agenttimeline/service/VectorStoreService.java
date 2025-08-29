@@ -399,6 +399,14 @@ public class VectorStoreService {
     }
 
     /**
+     * Get the chunking service for testing purposes
+     * @return The chunking service instance
+     */
+    public ChunkingService getChunkingService() {
+        return chunkingService;
+    }
+
+    /**
      * Test embedding generation directly within VectorStoreService
      * @param text The text to embed
      * @return The embedding result
