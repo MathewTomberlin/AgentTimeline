@@ -1,6 +1,13 @@
 @echo off
 REM AgentTimeline Chat Script Launcher
 REM Launches the PowerShell chat interface
+REM
+REM Usage:
+REM   chat.bat                           - Enhanced chat (with Phase 6 memory)
+REM   chat.bat -SimpleChat              - Simple chat (no memory services)
+REM   chat.bat -SessionId "my-session"  - Use specific session ID
+REM   chat.bat -ShowPrompt              - Show LLM prompts (enhanced mode only)
+REM   chat.bat -NoPause                 - Don't pause at end
 
 REM Check if PowerShell execution policy allows script running
 powershell -Command "Get-ExecutionPolicy" | findstr /i "Restricted" >nul

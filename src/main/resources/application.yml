@@ -103,6 +103,14 @@ prompt:
   # Include metadata in prompts
   include:
     metadata: true
+  # Use improved prompt format optimized for dolphin3
+  improved:
+    format:
+      enabled: true
+  # Use ChatML format for dolphin3-qwen2.5 model
+  chatml:
+    format:
+      enabled: true
 
 # Logging Configuration
 logging:

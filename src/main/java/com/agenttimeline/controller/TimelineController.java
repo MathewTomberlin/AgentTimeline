@@ -7,6 +7,7 @@ import com.agenttimeline.service.ChunkingService;
 import com.agenttimeline.service.ContextRetrievalService;
 import com.agenttimeline.service.EnhancedOllamaService;
 import com.agenttimeline.service.MessageChainValidator;
+import com.agenttimeline.service.OllamaService;
 import com.agenttimeline.service.TimelineService;
 import com.agenttimeline.service.VectorStoreService;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class TimelineController {
 
     private final TimelineService timelineService;
     private final VectorStoreService vectorStoreService;
+    private final OllamaService ollamaService;
 
     // Phase 6: Enhanced Context Management Services
     private final com.agenttimeline.service.ConversationHistoryManager conversationHistoryManager;
@@ -78,6 +80,41 @@ public class TimelineController {
                 })
                 .doOnError(error -> log.error("Error processing chat request", error))
                 .onErrorResume(error -> Mono.just(ResponseEntity.internalServerError().build()));
+    }
+
+    /**
+     * Simple chat endpoint without memory services
+     * Uses basic OllamaService directly - no context, no memory, no vector storage
+     * Useful for testing LLM responses without Phase 6 memory overhead
+     */
+    @PostMapping("/chat/simple")
+    public Mono<ResponseEntity<Map<String, Object>>> simpleChat(
+            @RequestBody Map<String, String> request,
+            @RequestParam(defaultValue = "default") String sessionId) {
+
+        String userMessage = request.get("message");
+        if (userMessage == null || userMessage.trim().isEmpty()) {
+            return Mono.just(ResponseEntity.badRequest().body(Map.of("error", "Message is required")));
+        }
+
+        log.info("Processing SIMPLE chat request for session: {} with message: '{}'", sessionId, userMessage);
+
+        return ollamaService.generateResponse(userMessage)
+                .map(ollamaResponse -> {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("sessionId", sessionId);
+                    response.put("userMessage", userMessage);
+                    response.put("assistantMessage", ollamaResponse.getResponse());
+                    response.put("model", ollamaResponse.getModel());
+                    response.put("mode", "simple");
+                    response.put("note", "No memory services used - direct LLM response only");
+
+                    log.info("Simple chat response generated for session: {} ({} chars)", sessionId, ollamaResponse.getResponse().length());
+                    return ResponseEntity.ok(response);
+                })
+                .doOnError(error -> log.error("Error in simple chat request for session: {}", sessionId, error))
+                .onErrorResume(error -> Mono.just(ResponseEntity.internalServerError().body(
+                    Map.of("error", error.getMessage(), "mode", "simple"))));
     }
 
     /**

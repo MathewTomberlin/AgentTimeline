@@ -1,12 +1,17 @@
 param(
     [string]$SessionId = "default",
     [switch]$NoPause,
-    [switch]$ShowPrompt
+    [switch]$ShowPrompt,
+    [switch]$SimpleChat
 )
 
 # Configuration
 $baseUrl = "http://localhost:8080/api/v1"
-$chatEndpoint = "$baseUrl/timeline/chat"
+if ($SimpleChat) {
+    $chatEndpoint = "$baseUrl/timeline/chat/simple"
+} else {
+    $chatEndpoint = "$baseUrl/timeline/chat"
+}
 
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "AgentTimeline - Chat Interface" -ForegroundColor Cyan
@@ -31,8 +36,13 @@ try {
 
 Write-Host "Session ID: $SessionId" -ForegroundColor Gray
 Write-Host "Type 'quit' or 'exit' to end the conversation" -ForegroundColor Gray
+if ($SimpleChat) {
+    Write-Host "Chat Mode: SIMPLE (No memory services)" -ForegroundColor Yellow
+} else {
+    Write-Host "Chat Mode: ENHANCED (With Phase 6 memory + ChatML format)" -ForegroundColor Yellow
+}
 if ($ShowPrompt) {
-    Write-Host "Show LLM Prompt: Enabled" -ForegroundColor Yellow
+    Write-Host "Show LLM Prompt: Enabled (Shows ChatML formatted prompts)" -ForegroundColor Yellow
 }
 Write-Host ""
 
@@ -71,8 +81,16 @@ while ($true) {
 
         # Display assistant response
         if ($response) {
-            if ($response.content) {
-                # Standard response format (no prompt requested)
+            if ($SimpleChat -and $response.assistantMessage) {
+                # Simple chat endpoint response format
+                Write-Host "Assistant: " -NoNewline -ForegroundColor Green
+                Write-Host $response.assistantMessage
+
+                if ($response.note) {
+                    Write-Host "[$($response.note)]" -ForegroundColor DarkGray
+                }
+            } elseif ($response.content) {
+                # Standard enhanced response format (no prompt requested)
                 Write-Host "Assistant: " -NoNewline -ForegroundColor Green
                 Write-Host $response.content
             } elseif ($response.message -and $response.message.content) {

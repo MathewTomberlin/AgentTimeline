@@ -39,11 +39,13 @@ public class EnhancedPromptBuilder {
     @Value("${prompt.include.metadata:true}")
     private boolean includeMetadata;
 
-    // Context source weights for prioritization
-    private static final double CONVERSATION_HISTORY_WEIGHT = 0.4;
-    private static final double KEY_INFORMATION_WEIGHT = 0.3;
-    private static final double HISTORICAL_CHUNKS_WEIGHT = 0.2;
-    private static final double CURRENT_MESSAGE_WEIGHT = 0.1;
+    @Value("${prompt.improved.format.enabled:true}")
+    private boolean improvedFormatEnabled;
+
+    @Value("${prompt.chatml.format.enabled:true}")
+    private boolean chatmlFormatEnabled;
+
+
 
     /**
      * Build an enhanced prompt from multiple context sources.
@@ -99,33 +101,35 @@ public class EnhancedPromptBuilder {
     }
 
     /**
-     * Build system context section.
+     * Build system context section with improved format for dolphin3 model.
      */
     private String buildSystemContext() {
-        return "You are an intelligent AI assistant engaged in a conversation. " +
-               "Use the provided context to give accurate, helpful, and contextually appropriate responses. " +
-               "Reference previous conversation elements when relevant, but don't force connections that aren't natural.";
+        return "You are a helpful AI assistant with access to conversation history.\n" +
+               "Your task is to provide accurate, contextual responses using the provided information.\n\n" +
+               "INSTRUCTIONS:\n" +
+               "- Use conversation history to maintain context and avoid repetition\n" +
+               "- Reference specific details from previous messages when relevant\n" +
+               "- Provide direct, helpful answers to user questions\n" +
+               "- If information conflicts, prioritize the most recent context";
     }
 
     /**
-     * Build conversation history section.
+     * Build conversation history section with improved format.
      */
     private String buildConversationHistorySection(ConversationHistoryManager.ConversationContext context) {
         StringBuilder section = new StringBuilder();
-        section.append("## Recent Conversation:\n");
 
-        // Add summary if available
         if (context.hasSummary()) {
-            section.append("**Summary:** ").append(context.getSummary()).append("\n\n");
+            section.append("CONVERSATION SUMMARY:\n");
+            section.append(context.getSummary()).append("\n\n");
         }
 
-        // Add recent messages
         if (context.hasRecentMessages()) {
-            section.append("**Recent Messages:**\n");
+            section.append("RECENT CONVERSATION:\n");
             for (Message message : context.getRecentMessages()) {
-                String role = message.getRole().toString().toLowerCase();
+                String role = message.getRole() == Message.Role.USER ? "User" : "Assistant";
                 String content = message.getContent();
-                section.append("- ").append(capitalize(role)).append(": ").append(content).append("\n");
+                section.append(role).append(": ").append(content).append("\n");
             }
             section.append("\n");
         }
@@ -134,97 +138,177 @@ public class EnhancedPromptBuilder {
     }
 
     /**
-     * Build key information section.
+     * Build key information section with improved format.
      */
     private String buildKeyInformationSection(KeyInformationExtractor.ExtractedInformation info) {
         StringBuilder section = new StringBuilder();
-        section.append("## Key Information:\n");
+
+        boolean hasContent = false;
 
         // Add entities
         if (!info.getEntities().isEmpty()) {
-            section.append("**Important Entities:** ");
-            section.append(String.join(", ", info.getEntities()));
-            section.append("\n");
+            section.append("KEY ENTITIES: ").append(String.join(", ", info.getEntities())).append("\n");
+            hasContent = true;
         }
 
         // Add key facts
-        if (!info.getKeyFacts().isEmpty()) {
-            section.append("**Key Facts:**\n");
+        if (!info.getKeyFacts().isEmpty() && info.getKeyFacts().size() <= 3) {
+            section.append("IMPORTANT FACTS:\n");
             for (String fact : info.getKeyFacts()) {
                 section.append("- ").append(fact).append("\n");
             }
-            section.append("\n");
+            hasContent = true;
         }
 
         // Add user intent (if applicable)
         if (info.getUserIntent() != null) {
-            section.append("**User Intent:** ").append(info.getUserIntent()).append("\n\n");
+            section.append("USER INTENT: ").append(info.getUserIntent()).append("\n");
+            hasContent = true;
         }
 
-        // Add action items
-        if (!info.getActionItems().isEmpty()) {
-            section.append("**Action Items:**\n");
-            for (String action : info.getActionItems()) {
-                section.append("- ").append(action).append("\n");
-            }
+        if (hasContent) {
             section.append("\n");
         }
 
-        // Add contextual information
-        if (info.getContextualInfo() != null) {
-            section.append("**Context:** ").append(info.getContextualInfo()).append("\n\n");
-        }
-
         return section.toString();
     }
 
     /**
-     * Build historical context section from retrieved chunks.
+     * Build historical context section from retrieved chunks with improved format.
      */
     private String buildHistoricalContextSection(List<ConfigurableContextRetrievalService.ExpandedChunkGroup> chunks) {
+        if (chunks == null || chunks.isEmpty()) {
+            return "";
+        }
+
         StringBuilder section = new StringBuilder();
-        section.append("## Relevant Historical Context:\n");
+        section.append("ADDITIONAL CONTEXT:\n");
+
+        // Deduplicate and limit context chunks
+        Set<String> seenChunks = new HashSet<>();
+        int maxChunks = 3; // Limit to prevent overload
+        int count = 0;
 
         for (ConfigurableContextRetrievalService.ExpandedChunkGroup group : chunks) {
-            section.append("**Context from previous conversation:**\n");
-            section.append("\"").append(group.getCombinedText()).append("\"\n\n");
+            if (count >= maxChunks) break;
+
+            String text = group.getCombinedText();
+            if (text != null && !text.trim().isEmpty() && !seenChunks.contains(text)) {
+                // Clean up repetitive or irrelevant context
+                if (!isRepetitiveContext(text)) {
+                    section.append("- ").append(text.trim());
+                    if (!text.endsWith(".")) {
+                        section.append(".");
+                    }
+                    section.append("\n");
+                    seenChunks.add(text);
+                    count++;
+                }
+            }
+        }
+
+        if (count > 0) {
+            section.append("\n");
         }
 
         return section.toString();
     }
 
     /**
-     * Build current message section.
+     * Check if context chunk is repetitive or unhelpful.
      */
-    private String buildCurrentMessageSection(String userMessage) {
-        return "## Current Message:\n" + userMessage;
+    private boolean isRepetitiveContext(String text) {
+        if (text == null) return true;
+
+        String lowerText = text.toLowerCase();
+        // Filter out generic or repetitive phrases
+        return lowerText.contains("what did i say") ||
+               lowerText.contains("can you tell me") ||
+               lowerText.length() < 10 ||
+               lowerText.split("\\s+").length < 3;
     }
 
     /**
-     * Build final prompt with intelligent prioritization and length management.
+     * Build current message section with clear formatting.
+     */
+    private String buildCurrentMessageSection(String userMessage) {
+        return "CURRENT USER MESSAGE:\n" + userMessage.trim();
+    }
+
+    /**
+     * Build final prompt using appropriate format based on configuration.
+     * Uses ChatML format for dolphin3-qwen2.5 model if enabled.
      */
     private String buildFinalPrompt(PromptComponents components, String sessionId) {
+        if (chatmlFormatEnabled) {
+            return buildChatMLPrompt(components, sessionId);
+        } else {
+            return buildLegacyPrompt(components, sessionId);
+        }
+    }
+
+    /**
+     * Build final prompt using ChatML format for dolphin3-qwen2.5 model.
+     * All context must be structured as chat messages with proper roles.
+     */
+    private String buildChatMLPrompt(PromptComponents components, String sessionId) {
         StringBuilder prompt = new StringBuilder();
 
-        // Add system context (always included)
-        prompt.append(components.getSystemContext()).append("\n\n");
+        // System message in ChatML format
+        prompt.append("<|im_start|>system\n");
+        prompt.append(buildChatMLSystemMessage()).append("\n");
+        prompt.append("<|im_end|>\n");
 
-        // Prioritize and add context sections based on strategy
-        List<ContextSection> prioritizedSections = prioritizeContextSections(components);
+        // Convert all context into chat message format
+        List<ChatMessage> chatMessages = convertContextToChatMessages(components, sessionId);
 
-        // Calculate available space for context
-        int systemLength = components.getSystemContext().length();
-        int currentMessageLength = components.getCurrentMessage().length();
-        int overhead = systemLength + currentMessageLength + 500; // Buffer for formatting
-        int availableContextSpace = maxPromptLength - overhead;
-
-        // Add context sections with intelligent truncation
-        String contextContent = buildContextContent(prioritizedSections, availableContextSpace, sessionId);
-        if (!contextContent.isEmpty()) {
-            prompt.append(contextContent).append("\n");
+        // Add all context messages
+        for (ChatMessage msg : chatMessages) {
+            prompt.append("<|im_start|>").append(msg.getRole()).append("\n");
+            prompt.append(msg.getContent()).append("\n");
+            prompt.append("<|im_end|>\n");
         }
 
-        // Add current message
+        // Add current user message
+        prompt.append("<|im_start|>user\n");
+        prompt.append(extractUserMessageContent(components.getCurrentMessage())).append("\n");
+        prompt.append("<|im_end|>\n");
+
+        // Start assistant response
+        prompt.append("<|im_start|>assistant\n");
+
+        // Final length check and truncation if needed
+        String finalPrompt = prompt.toString();
+        if (enableTruncation && finalPrompt.length() > maxPromptLength) {
+            finalPrompt = applyChatMLTruncation(finalPrompt, sessionId);
+        }
+
+        return finalPrompt;
+    }
+
+    /**
+     * Build final prompt using legacy format (for backward compatibility).
+     */
+    private String buildLegacyPrompt(PromptComponents components, String sessionId) {
+        StringBuilder prompt = new StringBuilder();
+
+        // System instructions first (clear and concise)
+        prompt.append(components.getSystemContext()).append("\n\n");
+
+        // Add context sections in logical order
+        if (!components.getConversationHistory().isEmpty()) {
+            prompt.append(components.getConversationHistory());
+        }
+
+        if (!components.getKeyInformation().isEmpty()) {
+            prompt.append(components.getKeyInformation());
+        }
+
+        if (!components.getHistoricalContext().isEmpty()) {
+            prompt.append(components.getHistoricalContext());
+        }
+
+        // Current user message (clearly marked)
         prompt.append(components.getCurrentMessage());
 
         // Final length check and truncation if needed
@@ -237,118 +321,177 @@ public class EnhancedPromptBuilder {
     }
 
     /**
-     * Prioritize context sections based on strategy and content quality.
+     * Build system message optimized for ChatML format.
      */
-    private List<ContextSection> prioritizeContextSections(PromptComponents components) {
-        List<ContextSection> sections = new ArrayList<>();
-
-        // Add sections in priority order
-        if (components.hasConversationHistory()) {
-            sections.add(new ContextSection("conversation",
-                components.getConversationHistory(),
-                CONVERSATION_HISTORY_WEIGHT));
-        }
-
-        if (components.hasKeyInformation()) {
-            sections.add(new ContextSection("keyInfo",
-                components.getKeyInformation(),
-                KEY_INFORMATION_WEIGHT));
-        }
-
-        if (components.hasHistoricalContext()) {
-            sections.add(new ContextSection("historical",
-                components.getHistoricalContext(),
-                HISTORICAL_CHUNKS_WEIGHT));
-        }
-
-        // Sort by priority (higher weight first)
-        sections.sort((a, b) -> Double.compare(b.getPriority(), a.getPriority()));
-
-        return sections;
+    private String buildChatMLSystemMessage() {
+        return "You are a helpful AI assistant with access to conversation history. " +
+               "Your task is to provide accurate, contextual responses using the provided information. " +
+               "Use conversation history to maintain context and avoid repetition. " +
+               "Reference specific details from previous messages when relevant. " +
+               "Provide direct, helpful answers to user questions. " +
+               "If information conflicts, prioritize the most recent context.";
     }
 
     /**
-     * Build context content with intelligent space allocation.
+     * Convert all context information into chat message format.
      */
-    private String buildContextContent(List<ContextSection> sections, int availableSpace, String sessionId) {
-        StringBuilder context = new StringBuilder();
-        int remainingSpace = availableSpace;
+    private List<ChatMessage> convertContextToChatMessages(PromptComponents components, String sessionId) {
+        List<ChatMessage> messages = new ArrayList<>();
 
-        for (ContextSection section : sections) {
-            String sectionContent = section.getContent();
-
-            // Check if we have space for this section
-            if (sectionContent.length() <= remainingSpace) {
-                // Add full section
-                context.append(sectionContent);
-                remainingSpace -= sectionContent.length();
-                log.debug("Added full {} section ({} chars) for session {}",
-                    section.getType(), sectionContent.length(), sessionId);
-            } else if (remainingSpace > 100) { // Only add if we have meaningful space
-                // Add truncated section
-                String truncatedSection = truncateSection(sectionContent, remainingSpace);
-                context.append(truncatedSection);
-                log.debug("Added truncated {} section ({} -> {} chars) for session {}",
-                    section.getType(), sectionContent.length(), truncatedSection.length(), sessionId);
-                break; // No more space for additional sections
-            } else {
-                log.debug("Skipping {} section due to insufficient space ({} chars available) for session {}",
-                    section.getType(), remainingSpace, sessionId);
-                break;
-            }
+        // Convert conversation history to chat messages
+        if (!components.getConversationHistory().isEmpty()) {
+            messages.addAll(convertConversationHistoryToMessages(components.getConversationHistory()));
         }
 
-        return context.toString();
+        // Convert key information to chat messages
+        if (!components.getKeyInformation().isEmpty()) {
+            messages.addAll(convertKeyInformationToMessages(components.getKeyInformation()));
+        }
+
+        // Convert historical context to chat messages
+        if (!components.getHistoricalContext().isEmpty()) {
+            messages.addAll(convertHistoricalContextToMessages(components.getHistoricalContext()));
+        }
+
+        return messages;
     }
 
     /**
-     * Truncate a section intelligently.
+     * Convert conversation history to chat message format.
      */
-    private String truncateSection(String content, int maxLength) {
-        if (content.length() <= maxLength) {
-            return content;
+    private List<ChatMessage> convertConversationHistoryToMessages(String conversationHistory) {
+        List<ChatMessage> messages = new ArrayList<>();
+
+        // Parse the conversation history and convert to proper chat messages
+        String[] lines = conversationHistory.split("\n");
+        StringBuilder currentContent = new StringBuilder();
+        String currentRole = null;
+
+        for (String line : lines) {
+            if (line.startsWith("User: ")) {
+                // Save previous message if exists
+                if (currentRole != null && currentContent.length() > 0) {
+                    messages.add(new ChatMessage(currentRole, currentContent.toString().trim()));
+                }
+                // Start new user message
+                currentRole = "user";
+                currentContent = new StringBuilder(line.substring(6)); // Remove "User: "
+            } else if (line.startsWith("Assistant: ")) {
+                // Save previous message if exists
+                if (currentRole != null && currentContent.length() > 0) {
+                    messages.add(new ChatMessage(currentRole, currentContent.toString().trim()));
+                }
+                // Start new assistant message
+                currentRole = "assistant";
+                currentContent = new StringBuilder(line.substring(11)); // Remove "Assistant: "
+            } else if (!line.trim().isEmpty() && currentRole != null) {
+                // Continue current message
+                currentContent.append("\n").append(line);
+            }
         }
 
-        // Try to truncate at a natural break point
-        int truncationPoint = findNaturalBreakPoint(content, maxLength - 50); // Leave space for "..."
+        // Add final message
+        if (currentRole != null && currentContent.length() > 0) {
+            messages.add(new ChatMessage(currentRole, currentContent.toString().trim()));
+        }
 
-        String truncated = content.substring(0, truncationPoint);
-        return truncated + "\n[...content truncated due to length...]\n";
+        return messages;
     }
 
     /**
-     * Find a natural break point in the content.
+     * Convert key information to chat message format.
      */
-    private int findNaturalBreakPoint(String content, int targetLength) {
-        if (targetLength >= content.length()) {
-            return content.length();
+    private List<ChatMessage> convertKeyInformationToMessages(String keyInformation) {
+        List<ChatMessage> messages = new ArrayList<>();
+
+        if (keyInformation.trim().length() > 0) {
+            // Add key information as a system-like message from assistant
+            messages.add(new ChatMessage("assistant",
+                "Here is some key information that may be relevant: " + keyInformation.trim()));
         }
 
-        // Look for section breaks first
-        for (int i = targetLength; i > targetLength - 200 && i > 0; i--) {
-            if (i < content.length() - 2 && content.substring(i, i + 2).equals("\n\n")) {
-                return i;
-            }
-        }
-
-        // Look for sentence endings
-        for (int i = targetLength; i > targetLength - 100 && i > 0; i--) {
-            char c = content.charAt(i);
-            if (c == '.' || c == '!' || c == '?' || c == '\n') {
-                return i + 1;
-            }
-        }
-
-        // Look for word boundaries
-        for (int i = targetLength; i > targetLength - 50 && i > 0; i--) {
-            if (Character.isWhitespace(content.charAt(i))) {
-                return i;
-            }
-        }
-
-        // Fallback to character-based truncation
-        return targetLength;
+        return messages;
     }
+
+    /**
+     * Convert historical context to chat message format.
+     */
+    private List<ChatMessage> convertHistoricalContextToMessages(String historicalContext) {
+        List<ChatMessage> messages = new ArrayList<>();
+
+        if (historicalContext.trim().length() > 0) {
+            // Add historical context as assistant providing context
+            messages.add(new ChatMessage("assistant",
+                "Additional relevant context from previous conversations: " + historicalContext.trim()));
+        }
+
+        return messages;
+    }
+
+    /**
+     * Extract user message content from current message section.
+     */
+    private String extractUserMessageContent(String currentMessage) {
+        // Remove the "CURRENT USER MESSAGE:\n" prefix if present
+        if (currentMessage.startsWith("CURRENT USER MESSAGE:\n")) {
+            return currentMessage.substring("CURRENT USER MESSAGE:\n".length()).trim();
+        }
+        return currentMessage.trim();
+    }
+
+    /**
+     * Apply truncation specifically for ChatML format.
+     */
+    private String applyChatMLTruncation(String prompt, String sessionId) {
+        log.warn("Applying ChatML truncation to prompt for session {}: {} chars (limit: {})",
+            sessionId, prompt.length(), maxPromptLength);
+
+        // For ChatML format, we need to be more careful about truncation
+        // Try to truncate from the middle, keeping system message and recent context
+        String systemTag = "<|im_start|>system\n";
+        String systemEndTag = "<|im_end|>\n";
+        String userTag = "<|im_start|>user\n";
+
+        int systemStart = prompt.indexOf(systemTag);
+        int systemEnd = prompt.indexOf(systemEndTag, systemStart);
+        int lastUserStart = prompt.lastIndexOf(userTag);
+
+        if (systemStart >= 0 && systemEnd > 0 && lastUserStart > 0) {
+            // Keep system message and final user message
+            String systemPart = prompt.substring(systemStart, systemEnd + systemEndTag.length());
+            String userPart = prompt.substring(lastUserStart);
+            String assistantPart = "<|im_start|>assistant\n";
+
+            // Calculate space for middle content
+            int overhead = systemPart.length() + userPart.length() + assistantPart.length();
+            int availableForMiddle = maxPromptLength - overhead - 100; // Buffer
+
+            if (availableForMiddle > 0) {
+                // Find middle content
+                int middleStart = systemEnd + systemEndTag.length();
+                int middleEnd = lastUserStart;
+
+                if (middleEnd > middleStart) {
+                    String middleContent = prompt.substring(middleStart, middleEnd);
+                    if (middleContent.length() > availableForMiddle) {
+                        // Truncate middle content
+                        middleContent = middleContent.substring(0, availableForMiddle - 50) +
+                                      "\n[...context truncated due to length...]\n";
+                    }
+                    return systemPart + middleContent + userPart + assistantPart;
+                }
+            }
+        }
+
+        // Fallback: simple truncation
+        return prompt.substring(0, maxPromptLength - 50) + "\n[...truncated...]\n";
+    }
+
+
+
+
+
+
 
     /**
      * Apply final truncation to the complete prompt if still too long.
@@ -430,7 +573,38 @@ public class EnhancedPromptBuilder {
         stats.put("enableTruncation", enableTruncation);
         stats.put("contextPriority", contextPriority);
         stats.put("includeMetadata", includeMetadata);
+        stats.put("improvedFormatEnabled", improvedFormatEnabled);
+        stats.put("chatmlFormatEnabled", chatmlFormatEnabled);
         return stats;
+    }
+
+    /**
+     * Inner class representing a chat message for ChatML format.
+     */
+    private static class ChatMessage {
+        private final String role;
+        private final String content;
+
+        public ChatMessage(String role, String content) {
+            this.role = role;
+            this.content = content;
+        }
+
+        public String getRole() {
+            return role;
+        }
+
+        public String getContent() {
+            return content;
+        }
+
+        @Override
+        public String toString() {
+            return "ChatMessage{" +
+                "role='" + role + '\'' +
+                ", content='" + content.substring(0, Math.min(50, content.length())) + "...'" +
+                '}';
+        }
     }
 
     /**
@@ -484,22 +658,5 @@ public class EnhancedPromptBuilder {
         }
     }
 
-    /**
-     * Inner class for context sections with priority.
-     */
-    private static class ContextSection {
-        private final String type;
-        private final String content;
-        private final double priority;
 
-        public ContextSection(String type, String content, double priority) {
-            this.type = type;
-            this.content = content;
-            this.priority = priority;
-        }
-
-        public String getType() { return type; }
-        public String getContent() { return content; }
-        public double getPriority() { return priority; }
-    }
 }
