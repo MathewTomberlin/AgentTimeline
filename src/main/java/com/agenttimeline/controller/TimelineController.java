@@ -863,6 +863,149 @@ public class TimelineController {
     }
 
     /**
+     * Clear Phase 6 memory caches and conversation history.
+     */
+    @DeleteMapping("/phase6/clear")
+    public ResponseEntity<Map<String, Object>> clearPhase6Memory(
+            @RequestParam(defaultValue = "false") boolean force) {
+
+        try {
+            if (!force) {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Use force=true to clear Phase 6 memory caches",
+                    "usage", "DELETE /api/v1/timeline/phase6/clear?force=true"
+                ));
+            }
+
+            Map<String, Object> results = new HashMap<>();
+
+            // Clear conversation history manager
+            if (conversationHistoryManager != null) {
+                Map<String, Object> historyStats = conversationHistoryManager.getStatistics();
+                int sessionsBefore = (Integer) historyStats.getOrDefault("totalSessions", 0);
+
+                // Clear all conversation history
+                int sessionsCleared = conversationHistoryManager.clearAllHistory();
+
+                results.put("conversationHistory", Map.of(
+                    "sessionsBefore", sessionsBefore,
+                    "sessionsCleared", sessionsCleared,
+                    "status", "cleared"
+                ));
+            }
+
+            // Clear key information extractor cache
+            if (keyInformationExtractor != null) {
+                Map<String, Object> cacheStats = keyInformationExtractor.getCacheStatistics();
+                keyInformationExtractor.clearCache();
+
+                Map<String, Object> newCacheStats = keyInformationExtractor.getCacheStatistics();
+                results.put("extractionCache", Map.of(
+                    "entriesCleared", cacheStats.getOrDefault("cacheSize", 0),
+                    "remainingEntries", newCacheStats.getOrDefault("cacheSize", 0)
+                ));
+            }
+
+            // Clear context retrieval metrics
+            if (configurableContextRetrievalService != null) {
+                Map<String, Object> retrievalStats = configurableContextRetrievalService.getStatistics();
+                // Note: RetrievalMetrics doesn't have a clear method, so we can't clear it
+                // In production, you might want to add a clear() method to RetrievalMetrics
+                results.put("retrievalMetrics", Map.of(
+                    "status", "not_cleared",
+                    "note", "Retrieval metrics persist until application restart",
+                    "currentStats", retrievalStats
+                ));
+            }
+
+            results.put("timestamp", java.time.LocalDateTime.now());
+            results.put("status", "partial_clear");
+            results.put("message", "Phase 6 memory caches cleared where possible");
+
+            log.info("Phase 6 memory caches cleared: {}", results);
+            return ResponseEntity.ok(results);
+
+        } catch (Exception e) {
+            log.error("Error clearing Phase 6 memory: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName(),
+                "status", "clear_failed"
+            ));
+        }
+    }
+
+    /**
+     * Clear all Phase 6 data including memory caches and conversation history.
+     */
+    @DeleteMapping("/phase6/clear-all")
+    public ResponseEntity<Map<String, Object>> clearAllPhase6Data(
+            @RequestParam(defaultValue = "false") boolean force) {
+
+        try {
+            if (!force) {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Use force=true to clear ALL Phase 6 data",
+                    "warning", "This will clear all conversation history and caches",
+                    "usage", "DELETE /api/v1/timeline/phase6/clear-all?force=true"
+                ));
+            }
+
+            Map<String, Object> results = new HashMap<>();
+
+            // Clear all conversation history
+            if (conversationHistoryManager != null) {
+                Map<String, Object> historyStats = conversationHistoryManager.getStatistics();
+                int sessionsBefore = (Integer) historyStats.getOrDefault("totalSessions", 0);
+
+                // Clear all conversation history
+                int sessionsCleared = conversationHistoryManager.clearAllHistory();
+
+                results.put("conversationHistory", Map.of(
+                    "sessionsBefore", sessionsBefore,
+                    "sessionsCleared", sessionsCleared,
+                    "status", "cleared"
+                ));
+            }
+
+            // Clear extraction cache
+            if (keyInformationExtractor != null) {
+                Map<String, Object> cacheStats = keyInformationExtractor.getCacheStatistics();
+                keyInformationExtractor.clearCache();
+                results.put("extractionCache", Map.of(
+                    "cleared", true,
+                    "entriesRemoved", cacheStats.getOrDefault("cacheSize", 0)
+                ));
+            }
+
+            // Note about retrieval metrics
+            if (configurableContextRetrievalService != null) {
+                Map<String, Object> retrievalStats = configurableContextRetrievalService.getStatistics();
+                results.put("retrievalMetrics", Map.of(
+                    "cleared", false,
+                    "note", "Metrics persist until application restart",
+                    "currentStats", retrievalStats.getOrDefault("metrics", Map.of())
+                ));
+            }
+
+            results.put("timestamp", java.time.LocalDateTime.now());
+            results.put("status", "clear_completed");
+            results.put("message", "Phase 6 data cleared (memory caches and accessible conversation history)");
+
+            log.info("All Phase 6 data cleared: {}", results);
+            return ResponseEntity.ok(results);
+
+        } catch (Exception e) {
+            log.error("Error clearing all Phase 6 data: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName(),
+                "status", "clear_failed"
+            ));
+        }
+    }
+
+    /**
      * Test Phase 6 context retrieval with custom configuration.
      */
     @PostMapping("/phase6/test/retrieval")

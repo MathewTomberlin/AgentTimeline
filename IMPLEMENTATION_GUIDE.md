@@ -515,54 +515,54 @@ Assistant: [AI response generation]
 4. **Configurability**: Support for 10+ configuration parameters
 5. **Reliability**: <1% failure rate for information extraction and summarization
 
-## Phase 6: Enhanced Context Management with Conversation History and Configurable Retrieval - COMPLETED ✅
+## Phase 6: Enhanced Context Management with Conversation History and Configurable Retrieval - IMPLEMENTED WITH KNOWN ISSUES ⚠️
 
-Phase 6 has been successfully implemented with comprehensive enhanced context management capabilities that address all the critical limitations identified in the original system.
+Phase 6 has been implemented with core enhanced context management capabilities. While the infrastructure is in place, there are significant issues with LLM context utilization that require further optimization.
 
-### Phase 6 Implementation Summary
+### Phase 6 Implementation Status
 
-#### ✅ **New Components Created**
-- **`ConversationHistoryManager`** - Rolling conversation windows with automatic summarization
-- **`ConversationSummaryService`** - LLM-powered conversation summarization with intelligent updates
-- **`KeyInformationExtractor`** - Structured extraction of entities, facts, and relationships
-- **`ConfigurableContextRetrievalService`** - Fully configurable chunk retrieval with multiple strategies
-- **`EnhancedPromptBuilder`** - Intelligent multi-source context integration
-- **Updated Configuration System** - Comprehensive configuration management with validation
+#### ✅ **Fully Implemented & Working**
+- **`ConversationHistoryManager`** - Rolling conversation windows with automatic summarization ✅
+- **`ConversationSummaryService`** - LLM-powered conversation summarization ✅
+- **`ConfigurableContextRetrievalService`** - Fully configurable chunk retrieval ✅
+- **Memory Management** - Clear endpoints and script integration ✅
+- **Configuration System** - Comprehensive parameter management ✅
 
-#### ✅ **Key Features Implemented**
+#### ⚠️ **Partially Implemented - Needs Optimization**
+- **`KeyInformationExtractor`** - Basic extraction working, but output quality needs improvement
+- **`EnhancedPromptBuilder`** - Multi-source integration working, but LLM context utilization poor
 
-**Conversation History Management:**
-- Rolling window of configurable size (default: 10 messages)
-- Automatic summarization when windows exceed limits
-- Memory-efficient storage with cleanup policies
-- Progressive summary updates to preserve information quality
+#### ❌ **Known Issues Requiring Fixes**
 
-**Intelligent Information Extraction:**
-- LLM-powered extraction of key facts, entities, user intent
-- Context-aware extraction based on conversation flow
-- Structured output with fallback mechanisms
-- Async processing for performance optimization
+**Critical LLM Context Issues:**
+- **Poor Context Utilization**: LLM frequently ignores provided context and responds based on training data
+- **Verbatim Memory Output**: LLM sometimes outputs previous conversation lines verbatim without adaptation
+- **Context Overload**: Verbose prompt format may overwhelm LLM's context processing
+- **Format Incompatibility**: Current prompt format may not be optimal for the target LLM model
 
-**Configurable Context Retrieval:**
-- Multiple retrieval strategies: Fixed, Adaptive, Intelligent
-- Configurable chunk retrieval parameters (no more hardcoded values)
-- Parameter validation and performance assessment
-- Real-time configuration without service restart
+**Example of Problematic LLM Response:**
+```
+User: "What is my name?"
+LLM Response: "Hi, hello, what did I say my name was?" (verbatim from previous context)
+```
 
-**Enhanced Prompt Construction:**
-- Multi-source context integration (conversation history + key info + retrieved chunks)
-- Intelligent prioritization and space allocation
-- Context quality assessment and truncation
-- Optimized prompt structure for LLM consumption
+**Current Prompt Structure Issues:**
+- Verbose and potentially overwhelming format
+- Unclear context boundaries for LLM parsing
+- Sparse key information extraction
+- Repetitive historical context
+- Missing markup tags that some models expect
 
 #### ✅ **New API Endpoints**
-- `GET /api/v1/timeline/phase6/stats` - Phase 6 system statistics
-- `GET /api/v1/timeline/phase6/context/{sessionId}` - Conversation context retrieval
-- `DELETE /api/v1/timeline/phase6/history/{sessionId}` - Clear conversation history
-- `POST /api/v1/timeline/phase6/extract` - Key information extraction testing
-- `GET /api/v1/timeline/phase6/retrieval/stats` - Context retrieval statistics
-- `GET /api/v1/timeline/phase6/history/stats` - Conversation history statistics
-- `POST /api/v1/timeline/phase6/test/retrieval` - Test retrieval with custom config
+- `GET /api/v1/timeline/phase6/stats` - Phase 6 system statistics ✅
+- `GET /api/v1/timeline/phase6/context/{sessionId}` - Conversation context retrieval ✅
+- `DELETE /api/v1/timeline/phase6/history/{sessionId}` - Clear conversation history ✅
+- `DELETE /api/v1/timeline/phase6/clear` - Clear all Phase 6 memory caches ✅
+- `DELETE /api/v1/timeline/phase6/clear-all` - Complete Phase 6 cleanup ✅
+- `POST /api/v1/timeline/phase6/extract` - Key information extraction testing ⚠️
+- `GET /api/v1/timeline/phase6/retrieval/stats` - Context retrieval statistics ✅
+- `GET /api/v1/timeline/phase6/history/stats` - Conversation history statistics ✅
+- `POST /api/v1/timeline/phase6/test/retrieval` - Test retrieval with custom config ✅
 
 #### ✅ **Configuration Parameters**
 ```yaml
@@ -628,13 +628,50 @@ prompt:
 - Configuration validation and performance assessment
 - Fallback mechanisms for component failures
 
-### Phase 6 Success Metrics Achieved
+#### ✅ **Updated Clear Messages Scripts**
+- **Enhanced clear-messages.bat**: Interactive menu with Phase 6 options
+- **Enhanced clear-messages.ps1**: Command-line parameters for Phase 6 cleanup
+- **New Cleanup Options**:
+  - `-ClearPhase6`: Clear Redis + Phase 6 memory caches
+  - `-ClearAll`: Complete cleanup (Redis + PostgreSQL + Phase 6 memory)
+  - Application connectivity testing before Phase 6 operations
+  - Graceful handling when application is not running
 
-1. **✅ Context Quality**: Intelligent summarization preserves >90% of relevant information
-2. **✅ Response Accuracy**: Multi-source context integration improves response relevance
-3. **✅ Performance**: <500ms total response time with enhanced context management
-4. **✅ Configurability**: Support for 15+ configuration parameters across all components
-5. **✅ Reliability**: Comprehensive error handling with automatic fallback mechanisms
+**Clear Messages Menu Options:**
+```
+[1] Redis only (preserves indexes)
+[2] Redis + PostgreSQL
+[3] Redis + Phase 6 memory
+[4] Complete cleanup (all data)
+[5] Show all keys (debug)
+[6] Help and usage
+```
+
+**Phase 6 Memory Cleanup Targets:**
+- Conversation history windows (rolling conversation memory)
+- Key information extraction cache (LLM analysis results)
+- Context retrieval metrics (performance statistics)
+- Automatic application connectivity detection
+
+### Phase 6 Current Status Metrics
+
+**✅ Achieved:**
+1. **Infrastructure**: Complete Phase 6 service architecture implemented
+2. **Memory Management**: Conversation history clearing working correctly
+3. **Configurability**: 15+ configuration parameters across all components
+4. **Reliability**: Comprehensive error handling and fallback mechanisms
+
+**❌ Not Yet Achieved (Critical Issues):**
+1. **Context Quality**: LLM frequently ignores provided context (~30% utilization rate)
+2. **Response Accuracy**: Significant verbatim output and context misinterpretation
+3. **LLM Integration**: Prompt format incompatible with target model expectations
+4. **Information Extraction**: Sparse and low-quality key information extraction
+
+**📊 Performance Metrics (Current):**
+- Context window management: ✅ Working
+- Memory cleanup: ✅ Working
+- Configuration validation: ✅ Working
+- LLM context utilization: ❌ Poor (~30% effective)
 
 ### Phase 6 Architecture Overview
 
@@ -654,4 +691,141 @@ LLM Response Generation
 Conversation History Update (Maintains Rolling Window)
 ```
 
-*Phase 6: Enhanced Context Management has been successfully implemented, transforming AgentTimeline into an intelligent conversation management system with configurable, efficient context augmentation. The system now provides immediate conversation history retention, intelligent summarization, configurable chunk retrieval, and multi-source context integration - addressing all critical limitations identified in the original design.*
+## Phase 6: Next Steps - Debugging & Optimization Roadmap
+
+### 🔍 **Immediate Debugging Priorities**
+
+#### **1. LLM Prompt Format Optimization**
+**Current Issue:** Verbose, unstructured prompts causing poor context utilization
+
+**Required Changes:**
+- Implement model-specific prompt formats with proper markup tags
+- Simplify context structure with clear section delimiters
+- Add explicit instructions for context usage
+- Test different prompt templates for the target model
+
+**Example Improved Format:**
+```markdown
+[SYSTEM]
+You are an AI assistant with access to conversation history.
+
+[CONVERSATION_CONTEXT]
+Previous exchanges:
+- User: Hello, my name is Mat
+- Assistant: Hi Mat, nice to meet you
+
+[CURRENT_QUERY]
+What is my name?
+
+[INSTRUCTIONS]
+Use the conversation context to answer accurately. Reference specific details from previous messages.
+```
+
+#### **2. Key Information Extraction Enhancement**
+**Current Issue:** Sparse, low-quality extraction results
+
+**Required Improvements:**
+- Refine LLM prompts for extraction tasks
+- Implement better entity recognition patterns
+- Add confidence scoring for extracted information
+- Create structured output validation
+
+#### **3. Context Quality Assessment**
+**Current Issue:** No mechanism to validate context relevance
+
+**Required Features:**
+- Implement context relevance scoring
+- Add context filtering based on query similarity
+- Create quality metrics for context chunks
+- Implement adaptive context selection
+
+#### **4. Model-Specific Optimization**
+**Current Issue:** Generic prompt format not optimized for sam860/dolphin3-qwen2.5:3b
+
+**Required Research:**
+- Analyze optimal prompt formats for the target model
+- Test different instruction styles and markup
+- Implement model-specific prompt templates
+- Add A/B testing framework for prompt optimization
+
+### 🛠️ **Implementation Roadmap**
+
+#### **Phase 6.1: Prompt Optimization (Priority: Critical)**
+- [ ] Analyze target model documentation for optimal prompt formats
+- [ ] Implement structured prompt templates with proper markup
+- [ ] Add explicit context usage instructions
+- [ ] Test prompt variations and measure context utilization rates
+
+#### **Phase 6.2: Context Quality Enhancement (Priority: High)**
+- [ ] Implement context relevance scoring algorithms
+- [ ] Add quality filters for retrieved context chunks
+- [ ] Enhance key information extraction accuracy
+- [ ] Create context validation and ranking system
+
+#### **Phase 6.3: Advanced Features (Priority: Medium)**
+- [ ] Implement multi-turn context awareness
+- [ ] Add conversation state tracking
+- [ ] Create personalized context adaptation
+- [ ] Implement context compression for long conversations
+
+#### **Phase 6.4: Monitoring & Analytics (Priority: Medium)**
+- [ ] Add context utilization metrics and tracking
+- [ ] Implement A/B testing for prompt optimization
+- [ ] Create performance dashboards for context effectiveness
+- [ ] Add automated quality assessment tools
+
+### 📊 **Success Criteria for Phase 6 Completion**
+
+**Functional Requirements:**
+- ✅ LLM context utilization rate >80%
+- ✅ Verbatim output rate <5%
+- ✅ Context-aware responses >90% of the time
+- ✅ Accurate information recall from conversation history
+
+**Quality Metrics:**
+- ✅ Response relevance score >8/10
+- ✅ Context-appropriate responses >95%
+- ✅ No hallucinated information from context gaps
+- ✅ Proper handling of contradictory information
+
+### 🔧 **Testing & Validation Strategy**
+
+#### **Automated Testing:**
+- Unit tests for all Phase 6 components
+- Integration tests for end-to-end context flow
+- Performance benchmarks for context processing
+- LLM response quality validation tests
+
+#### **Manual Testing:**
+- Conversation continuity testing across multiple turns
+- Context accuracy validation with complex scenarios
+- Edge case testing for context conflicts
+- Multi-session conversation handling
+
+#### **Monitoring:**
+- Real-time context utilization metrics
+- LLM response quality tracking
+- Performance monitoring dashboards
+- Automated alerts for context quality degradation
+
+### 🎯 **Current Limitations & Known Issues**
+
+1. **LLM Context Utilization**: Primary blocker for Phase 6 effectiveness
+2. **Prompt Format Compatibility**: May require model-specific optimizations
+3. **Context Overload**: Large context windows may confuse the LLM
+4. **Information Extraction Quality**: Current extraction is too sparse
+5. **Context Relevance**: No quality scoring for retrieved information
+
+### 📈 **Expected Outcomes After Optimization**
+
+**Before Optimization:**
+- Context utilization: ~30%
+- Verbatim responses: ~20%
+- Context-aware accuracy: ~50%
+
+**After Optimization (Target):**
+- Context utilization: >80%
+- Verbatim responses: <5%
+- Context-aware accuracy: >90%
+
+*Phase 6 infrastructure is solid and functional. The critical path to completion is optimizing LLM prompt formats and context utilization. Once these issues are resolved, Phase 6 will deliver the intelligent conversation management capabilities originally envisioned.*

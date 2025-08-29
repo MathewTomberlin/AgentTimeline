@@ -198,6 +198,18 @@ public class ConversationHistoryManager {
     }
 
     /**
+     * Clear all conversation history for all sessions.
+     *
+     * @return Number of sessions cleared
+     */
+    public int clearAllHistory() {
+        int sessionsCleared = conversationWindows.size();
+        conversationWindows.clear();
+        log.info("Cleared conversation history for all {} sessions", sessionsCleared);
+        return sessionsCleared;
+    }
+
+    /**
      * Get statistics about conversation windows.
      *
      * @return Map containing statistics
