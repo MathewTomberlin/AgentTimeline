@@ -11,7 +11,9 @@ import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Date;
 
 @Service
 @RequiredArgsConstructor
@@ -23,12 +25,23 @@ public class TimelineService {
     private final MessageChainValidator chainValidator;
     private final VectorStoreService vectorStoreService;
 
-    // Phase 5: Context-Augmented Generation Services
+    // Phase 6: Enhanced Context Management Services
+    private final ConversationHistoryManager conversationHistoryManager;
+    private final ConversationSummaryService conversationSummaryService;
+    private final KeyInformationExtractor keyInformationExtractor;
+    private final ConfigurableContextRetrievalService configurableContextRetrievalService;
+    private final EnhancedPromptBuilder enhancedPromptBuilder;
+
+    // Legacy Phase 5 services (kept for backward compatibility)
     private final ContextRetrievalService contextRetrievalService;
     private final ChunkGroupManager chunkGroupManager;
     private final EnhancedOllamaService enhancedOllamaService;
 
-    // Phase 5 Configuration
+    // Phase 6 Configuration
+    @Value("${phase6.enabled:true}")
+    private boolean phase6Enabled;
+
+    // Legacy Phase 5 Configuration (kept for backward compatibility)
     @Value("${context.enabled:true}")
     private boolean contextEnabled;
 
@@ -61,12 +74,97 @@ public class TimelineService {
         // Process user message for vector storage (async to avoid blocking)
         processMessageForVectorStorage(savedUserMessage.getId(), userMessage, sessionId);
 
-        // Phase 5: Context-Augmented Generation
-        if (contextEnabled) {
+        // Phase 6: Enhanced Context Management (preferred)
+        if (phase6Enabled) {
+            log.debug("Phase 6 enabled: Using enhanced context management");
+            return generatePhase6Response(userMessage, sessionId, savedUserMessage, userMessageTimestamp);
+        }
+        // Phase 5: Context-Augmented Generation (fallback/legacy)
+        else if (contextEnabled) {
             log.debug("Phase 5 enabled: Retrieving context for enhanced response generation");
             return generateEnhancedResponse(userMessage, sessionId, savedUserMessage, userMessageTimestamp);
         } else {
-            log.debug("Phase 5 disabled: Using basic response generation");
+            log.debug("Context generation disabled: Using basic response generation");
+            return generateBasicResponse(userMessage, sessionId, savedUserMessage, userMessageTimestamp);
+        }
+    }
+
+    /**
+     * Generate enhanced response with Phase 6 context management.
+     */
+    private Mono<Message> generatePhase6Response(String userMessage, String sessionId,
+                                               Message savedUserMessage, LocalDateTime userMessageTimestamp) {
+        try {
+            log.debug("Starting Phase 6 enhanced response generation for session {}", sessionId);
+
+            // Step 1: Extract key information from user message (async)
+            CompletableFuture<KeyInformationExtractor.ExtractedInformation> keyInfoFuture =
+                CompletableFuture.supplyAsync(() ->
+                    keyInformationExtractor.extractInformation(savedUserMessage, sessionId));
+
+            // Step 2: Add message to conversation history
+            conversationHistoryManager.addMessage(sessionId, savedUserMessage);
+
+            // Step 3: Retrieve conversation context
+            ConversationHistoryManager.ConversationContext conversationContext =
+                conversationHistoryManager.getConversationContext(sessionId);
+
+            // Step 4: Retrieve relevant historical chunks using configurable service
+            List<ConfigurableContextRetrievalService.ExpandedChunkGroup> relevantChunks =
+                configurableContextRetrievalService.retrieveContext(userMessage, sessionId, savedUserMessage.getId());
+
+            // Step 5: Wait for key information extraction to complete
+            KeyInformationExtractor.ExtractedInformation keyInformation = keyInfoFuture.join();
+
+            // Step 6: Build enhanced prompt using all context sources
+            String enhancedPrompt = enhancedPromptBuilder.buildEnhancedPrompt(
+                userMessage, conversationContext, keyInformation, relevantChunks, sessionId);
+
+            // Step 7: Generate response using enhanced prompt
+            return enhancedOllamaService.generateResponseWithContext(userMessage,
+                convertToLegacyFormat(relevantChunks), sessionId)
+                .doOnNext(ollamaResponse -> {
+                    // Store the enhanced prompt for debugging
+                    lastEnhancedPrompts.put(sessionId, enhancedPrompt);
+                    log.debug("Stored Phase 6 enhanced prompt for session {}: {} chars", sessionId, enhancedPrompt.length());
+                })
+                .map(ollamaResponse -> {
+                    // Capture assistant message timestamp when response arrives
+                    LocalDateTime assistantMessageTimestamp = LocalDateTime.now();
+                    long responseTime = java.time.Duration.between(userMessageTimestamp, assistantMessageTimestamp).toMillis();
+
+                    // Create assistant message
+                    Message assistantMessage = createAssistantMessage(
+                        ollamaResponse.getResponse(),
+                        sessionId,
+                        savedUserMessage.getId(),
+                        ollamaResponse.getModel(),
+                        responseTime,
+                        assistantMessageTimestamp
+                    );
+
+                    Message savedAssistantMessage = messageRepository.save(assistantMessage);
+                    log.info("Saved Phase 6 assistant message with ID: {} at timestamp: {} (parent: {}, response time: {}ms)",
+                        savedAssistantMessage.getId(), assistantMessage.getTimestamp(),
+                        savedUserMessage.getId(), responseTime);
+
+                    // Add assistant message to conversation history
+                    conversationHistoryManager.addMessage(sessionId, savedAssistantMessage);
+
+                    // Process assistant message for vector storage (async)
+                    processMessageForVectorStorage(savedAssistantMessage.getId(),
+                        ollamaResponse.getResponse(), sessionId);
+
+                    return savedAssistantMessage;
+                })
+                .doOnError(error -> {
+                    log.error("Error in Phase 6 response generation for session {}: {}",
+                        sessionId, error.getMessage());
+                });
+
+        } catch (Exception e) {
+            log.error("Phase 6 context management failed for session {}, falling back to basic response: {}",
+                sessionId, e.getMessage(), e);
             return generateBasicResponse(userMessage, sessionId, savedUserMessage, userMessageTimestamp);
         }
     }
@@ -604,5 +702,85 @@ public class TimelineService {
             log.debug("Retrieved enhanced prompt for session {}: {} chars", sessionId, prompt.length());
             return prompt;
         });
+    }
+
+    /**
+     * Convert Phase 6 chunk groups to Phase 5 format for compatibility.
+     * This allows Phase 6 to use the existing EnhancedOllamaService.
+     */
+    private List<ChunkGroupManager.ContextChunkGroup> convertToLegacyFormat(
+            List<ConfigurableContextRetrievalService.ExpandedChunkGroup> phase6Groups) {
+
+        if (phase6Groups == null || phase6Groups.isEmpty()) {
+            return List.of();
+        }
+
+        List<ChunkGroupManager.ContextChunkGroup> legacyGroups = new ArrayList<>();
+
+        for (ConfigurableContextRetrievalService.ExpandedChunkGroup phase6Group : phase6Groups) {
+            try {
+                // Get message for timestamp information
+                Optional<Message> messageOpt = messageRepository.findById(phase6Group.getMessageId());
+                if (messageOpt.isEmpty()) {
+                    log.warn("Message {} not found for legacy format conversion", phase6Group.getMessageId());
+                    continue;
+                }
+
+                Message message = messageOpt.get();
+                Date messageTimestamp = Date.from(message.getTimestamp().toInstant(java.time.ZoneOffset.UTC));
+
+                // Convert to legacy format
+                ChunkGroupManager.ContextChunkGroup legacyGroup = new ChunkGroupManager.ContextChunkGroup(
+                    phase6Group.getMessageId(),
+                    phase6Group.getChunks(),
+                    messageTimestamp,
+                    messageTimestamp,
+                    message.getRole()
+                );
+
+                legacyGroups.add(legacyGroup);
+
+            } catch (Exception e) {
+                log.error("Error converting chunk group {} to legacy format: {}",
+                    phase6Group.getMessageId(), e.getMessage(), e);
+            }
+        }
+
+        log.debug("Converted {} Phase 6 groups to {} legacy groups", phase6Groups.size(), legacyGroups.size());
+        return legacyGroups;
+    }
+
+    /**
+     * Get Phase 6 system statistics and status.
+     */
+    public Map<String, Object> getPhase6Statistics() {
+        Map<String, Object> stats = new HashMap<>();
+
+        // Phase 6 service availability
+        stats.put("phase6Enabled", phase6Enabled);
+        stats.put("conversationHistoryManagerAvailable", conversationHistoryManager != null);
+        stats.put("conversationSummaryServiceAvailable", conversationSummaryService != null && conversationSummaryService.isAvailable());
+        stats.put("keyInformationExtractorAvailable", keyInformationExtractor != null && keyInformationExtractor.isAvailable());
+        stats.put("configurableContextRetrievalAvailable", configurableContextRetrievalService != null);
+        stats.put("enhancedPromptBuilderAvailable", enhancedPromptBuilder != null);
+
+        // Service-specific statistics
+        if (conversationHistoryManager != null) {
+            stats.put("conversationHistoryStats", conversationHistoryManager.getStatistics());
+        }
+
+        if (keyInformationExtractor != null) {
+            stats.put("keyInformationStats", keyInformationExtractor.getCacheStatistics());
+        }
+
+        if (configurableContextRetrievalService != null) {
+            stats.put("contextRetrievalStats", configurableContextRetrievalService.getStatistics());
+        }
+
+        if (enhancedPromptBuilder != null) {
+            stats.put("promptBuilderStats", enhancedPromptBuilder.getStatistics());
+        }
+
+        return stats;
     }
 }

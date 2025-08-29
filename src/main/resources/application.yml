@@ -43,30 +43,66 @@ ollama:
   embedding-model: nomic-embed-text
   timeout: 30000
 
-# Phase 5: Context-Augmented Generation Configuration
-context:
-  # Enable/disable Phase 5 context-augmented generation
+# Phase 6: Enhanced Context Management Configuration
+phase6:
+  # Enable/disable Phase 6 enhanced context management
   enabled: true
-  # Number of chunks to retrieve before each similar chunk
-  chunks:
-    before: 2
-    after: 2
-  # Maximum number of similar chunks to retrieve
+
+# Conversation History Management
+conversation:
+  history:
+    # Rolling window size (number of recent messages to keep)
+    window:
+      size: 10
+      max-summary-length: 1000
+    # History retention settings
+    retention:
+      max-age-hours: 24
+      cleanup-interval-minutes: 60
+
+# Key Information Extraction
+extraction:
+  # Maximum concurrent extraction requests
+  max-concurrent-requests: 5
+  # Timeout for extraction requests (seconds)
+  timeout-seconds: 30
+  # Enable fallback extraction when LLM is unavailable
+  enable-fallback: true
+
+# Context Retrieval Configuration (Phase 6 Enhanced)
+context:
+  retrieval:
+    # Retrieval strategy: fixed, adaptive, or intelligent
+    strategy: adaptive
+    # Chunk retrieval parameters (configurable instead of hardcoded)
+    chunks:
+      before: 2
+      after: 2
+      max-per-group: 5
+    # Similarity search parameters
+    similarity:
+      threshold: 0.3
+      max-results: 5
+    # Adaptive retrieval settings
+    adaptive:
+      enabled: true
+      quality-threshold: 0.7
+      expansion-factor: 1.5
+
+# Enhanced Prompt Building
+prompt:
+  # Maximum prompt length
   max:
-    similar: 5
-    groups: 3
-    total:
-      chunks: 20
-  # Minimum similarity threshold for chunk retrieval (0.0 to 1.0)
-  similarity:
-    threshold: 0.3
-  # Prompt length management
-  prompt:
-    max:
-      length: 4000
-  # Enable truncation for long contexts
+    length: 4000
+  # Enable intelligent truncation
   truncation:
     enabled: true
+  # Context prioritization strategy
+  context:
+    priority: balanced
+  # Include metadata in prompts
+  include:
+    metadata: true
 
 # Logging Configuration
 logging:

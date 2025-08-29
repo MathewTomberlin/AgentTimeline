@@ -28,7 +28,14 @@ public class TimelineController {
     private final TimelineService timelineService;
     private final VectorStoreService vectorStoreService;
 
-    // Phase 5: Context-Augmented Generation Services
+    // Phase 6: Enhanced Context Management Services
+    private final com.agenttimeline.service.ConversationHistoryManager conversationHistoryManager;
+    private final com.agenttimeline.service.ConversationSummaryService conversationSummaryService;
+    private final com.agenttimeline.service.KeyInformationExtractor keyInformationExtractor;
+    private final com.agenttimeline.service.ConfigurableContextRetrievalService configurableContextRetrievalService;
+    private final com.agenttimeline.service.EnhancedPromptBuilder enhancedPromptBuilder;
+
+    // Phase 5: Context-Augmented Generation Services (legacy)
     private final ContextRetrievalService contextRetrievalService;
     private final ChunkGroupManager chunkGroupManager;
     private final EnhancedOllamaService enhancedOllamaService;
@@ -670,6 +677,257 @@ public class TimelineController {
 
         } catch (Exception e) {
             log.error("Error in chunking debug: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName()
+            ));
+        }
+    }
+
+    // =====================================
+    // Phase 6: Enhanced Context Management
+    // =====================================
+
+    /**
+     * Get Phase 6 system statistics and status.
+     */
+    @GetMapping("/phase6/stats")
+    public ResponseEntity<Map<String, Object>> getPhase6Statistics() {
+        try {
+            Map<String, Object> stats = timelineService.getPhase6Statistics();
+            log.info("Retrieved Phase 6 statistics");
+            return ResponseEntity.ok(stats);
+        } catch (Exception e) {
+            log.error("Error retrieving Phase 6 statistics: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName()
+            ));
+        }
+    }
+
+    /**
+     * Get conversation context for a session (Phase 6).
+     */
+    @GetMapping("/phase6/context/{sessionId}")
+    public ResponseEntity<Map<String, Object>> getConversationContext(@PathVariable String sessionId) {
+        try {
+            var context = conversationHistoryManager.getConversationContext(sessionId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("sessionId", sessionId);
+            response.put("hasRecentMessages", context.hasRecentMessages());
+            response.put("hasSummary", context.hasSummary());
+            response.put("recentMessageCount", context.getRecentMessages().size());
+            response.put("summaryLength", context.getSummary() != null ? context.getSummary().length() : 0);
+
+            if (context.hasRecentMessages()) {
+                response.put("recentMessages", context.getRecentMessages().stream()
+                    .map(msg -> Map.of(
+                        "id", msg.getId(),
+                        "role", msg.getRole().toString(),
+                        "content", msg.getContent(),
+                        "timestamp", msg.getTimestamp()
+                    ))
+                    .toList());
+            }
+
+            if (context.hasSummary()) {
+                response.put("summary", context.getSummary());
+            }
+
+            log.info("Retrieved conversation context for session {}: {} messages, {} chars summary",
+                sessionId, context.getRecentMessages().size(),
+                context.getSummary() != null ? context.getSummary().length() : 0);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error retrieving conversation context for session {}: {}", sessionId, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName()
+            ));
+        }
+    }
+
+    /**
+     * Clear conversation history for a session (Phase 6).
+     */
+    @DeleteMapping("/phase6/history/{sessionId}")
+    public ResponseEntity<Map<String, Object>> clearConversationHistory(@PathVariable String sessionId) {
+        try {
+            conversationHistoryManager.clearHistory(sessionId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("sessionId", sessionId);
+            response.put("action", "history_cleared");
+            response.put("timestamp", java.time.LocalDateTime.now());
+
+            log.info("Cleared conversation history for session {}", sessionId);
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error clearing conversation history for session {}: {}", sessionId, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName()
+            ));
+        }
+    }
+
+    /**
+     * Extract key information from a message (Phase 6).
+     */
+    @PostMapping("/phase6/extract")
+    public ResponseEntity<Map<String, Object>> extractKeyInformation(
+            @RequestBody Map<String, String> request,
+            @RequestParam(defaultValue = "default") String sessionId) {
+
+        String messageText = request.get("message");
+        if (messageText == null || messageText.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Message text is required"));
+        }
+
+        try {
+            // Create a temporary message for extraction
+            Message tempMessage = new Message();
+            tempMessage.setId("temp-" + System.currentTimeMillis());
+            tempMessage.setContent(messageText);
+            tempMessage.setRole(Message.Role.USER);
+
+            var extractedInfo = keyInformationExtractor.extractInformation(tempMessage, sessionId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("sessionId", sessionId);
+            response.put("originalMessage", messageText);
+            response.put("extraction", Map.of(
+                "entities", extractedInfo.getEntities(),
+                "keyFacts", extractedInfo.getKeyFacts(),
+                "actionItems", extractedInfo.getActionItems(),
+                "userIntent", extractedInfo.getUserIntent(),
+                "contextualInfo", extractedInfo.getContextualInfo(),
+                "sentiment", extractedInfo.getSentiment(),
+                "urgency", extractedInfo.getUrgency(),
+                "isEmpty", extractedInfo.isEmpty()
+            ));
+
+            log.info("Extracted key information from message in session {}: {} entities, {} facts",
+                sessionId, extractedInfo.getEntities().size(), extractedInfo.getKeyFacts().size());
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error extracting key information: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName()
+            ));
+        }
+    }
+
+    /**
+     * Get configurable context retrieval statistics (Phase 6).
+     */
+    @GetMapping("/phase6/retrieval/stats")
+    public ResponseEntity<Map<String, Object>> getContextRetrievalStatistics() {
+        try {
+            Map<String, Object> stats = configurableContextRetrievalService.getStatistics();
+            log.info("Retrieved context retrieval statistics");
+            return ResponseEntity.ok(stats);
+        } catch (Exception e) {
+            log.error("Error retrieving context retrieval statistics: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName()
+            ));
+        }
+    }
+
+    /**
+     * Get conversation history manager statistics (Phase 6).
+     */
+    @GetMapping("/phase6/history/stats")
+    public ResponseEntity<Map<String, Object>> getConversationHistoryStatistics() {
+        try {
+            Map<String, Object> stats = conversationHistoryManager.getStatistics();
+            log.info("Retrieved conversation history statistics");
+            return ResponseEntity.ok(stats);
+        } catch (Exception e) {
+            log.error("Error retrieving conversation history statistics: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName()
+            ));
+        }
+    }
+
+    /**
+     * Test Phase 6 context retrieval with custom configuration.
+     */
+    @PostMapping("/phase6/test/retrieval")
+    public ResponseEntity<Map<String, Object>> testContextRetrieval(
+            @RequestBody Map<String, Object> request,
+            @RequestParam(defaultValue = "default") String sessionId) {
+
+        String userMessage = (String) request.get("message");
+        if (userMessage == null || userMessage.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "User message is required"));
+        }
+
+        try {
+            // Parse optional configuration parameters
+            var config = com.agenttimeline.service.ConfigurableContextRetrievalService.RetrievalConfig.builder();
+
+            if (request.containsKey("chunksBefore")) {
+                config.chunksBefore(((Number) request.get("chunksBefore")).intValue());
+            }
+            if (request.containsKey("chunksAfter")) {
+                config.chunksAfter(((Number) request.get("chunksAfter")).intValue());
+            }
+            if (request.containsKey("maxSimilarChunks")) {
+                config.maxSimilarChunks(((Number) request.get("maxSimilarChunks")).intValue());
+            }
+            if (request.containsKey("similarityThreshold")) {
+                config.similarityThreshold(((Number) request.get("similarityThreshold")).doubleValue());
+            }
+            if (request.containsKey("strategy")) {
+                String strategyStr = (String) request.get("strategy");
+                var strategy = switch (strategyStr.toLowerCase()) {
+                    case "fixed" -> com.agenttimeline.service.ConfigurableContextRetrievalService.RetrievalStrategy.FIXED;
+                    case "adaptive" -> com.agenttimeline.service.ConfigurableContextRetrievalService.RetrievalStrategy.ADAPTIVE;
+                    case "intelligent" -> com.agenttimeline.service.ConfigurableContextRetrievalService.RetrievalStrategy.INTELLIGENT;
+                    default -> com.agenttimeline.service.ConfigurableContextRetrievalService.RetrievalStrategy.ADAPTIVE;
+                };
+                config.strategy(strategy);
+            }
+
+            var retrievalConfig = config.build();
+            var results = configurableContextRetrievalService.retrieveContext(userMessage, sessionId, null, retrievalConfig);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("sessionId", sessionId);
+            response.put("userMessage", userMessage);
+            response.put("config", Map.of(
+                "strategy", retrievalConfig.getStrategy(),
+                "chunksBefore", retrievalConfig.getChunksBefore(),
+                "chunksAfter", retrievalConfig.getChunksAfter(),
+                "maxSimilarChunks", retrievalConfig.getMaxSimilarChunks(),
+                "similarityThreshold", retrievalConfig.getSimilarityThreshold()
+            ));
+            response.put("results", results.stream()
+                .map(group -> Map.of(
+                    "messageId", group.getMessageId(),
+                    "chunkCount", group.getChunkCount(),
+                    "combinedText", group.getCombinedText().substring(0, Math.min(200, group.getCombinedText().length()))
+                ))
+                .toList());
+
+            log.info("Tested context retrieval for session {}: {} groups found", sessionId, results.size());
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error testing context retrieval: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of(
                 "error", e.getMessage(),
                 "errorType", e.getClass().getSimpleName()
