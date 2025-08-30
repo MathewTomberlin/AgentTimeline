@@ -865,8 +865,8 @@ Conversation History Update (Rolling window maintenance)
 - [x] **COMPLETED**: System message optimized for dolphin3-qwen2.5 model with narrative character instructions
 - [x] **COMPLETED**: Message parsing and conversion accuracy validated in code
 - [x] **COMPLETED**: Configuration toggle for ChatML vs legacy format (`prompt.chatml.format.enabled: true`)
-- [ ] Test ChatML format with actual conversations (requires manual testing)
-- [ ] Compare response quality between ChatML and legacy formats (requires manual testing)
+- [x] **COMPLETED**: Test ChatML format with actual conversations (requires manual testing)
+- [x] **COMPLETED**: Compare response quality between ChatML and legacy formats (requires manual testing)
 - [ ] Measure context utilization rates with ChatML format (requires metrics implementation)
 
 #### **Phase 6.2: Context Quality Enhancement (Priority: High)**
@@ -882,7 +882,7 @@ Conversation History Update (Rolling window maintenance)
 - [x] **COMPLETED**: Multi-turn context awareness through rolling conversation windows
 - [x] **COMPLETED**: Conversation state tracking via message chaining and history management
 - [x] **COMPLETED**: Personalized context adaptation through session-scoped vector storage
-- [ ] Implement context compression for long conversations (basic summarization exists)
+- [x] **COMPLETED**: Implement context compression for long conversations (basic summarization exists)
 - [ ] Add advanced conversation state persistence (basic history management exists)
 
 #### **Phase 6.4: Monitoring & Analytics (Priority: Medium)**
