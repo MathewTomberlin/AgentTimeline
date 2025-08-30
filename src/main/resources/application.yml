@@ -53,7 +53,7 @@ conversation:
   history:
     # Rolling window size (number of recent messages to keep)
     window:
-      size: 2
+      size: 6
       max-summary-length: 1000
     # History retention settings
     retention:

@@ -228,13 +228,13 @@ public class ConversationSummaryService {
      */
     private String buildSummaryPrompt(String conversationText) {
         return String.format(
-            "You are an expert conversation summarizer. Your task is to create a concise but comprehensive summary of the following conversation. Focus on:\n\n" +
-            "1. Key topics discussed\n" +
-            "2. Important information shared by either participant\n" +
+            "You are an expert conversation summarizer. Your task is to create a comprehensive summary of the following conversation. Focus on:\n\n" +
+            "1. Topics discussed\n" +
+            "2. Information shared by either participant\n" +
             "3. Decisions made or actions agreed upon\n" +
             "4. Questions asked and answers provided\n" +
-            "5. Any specific facts, dates, or details mentioned\n\n" +
-            "Keep the summary informative but concise. Preserve important context that would help someone continue this conversation naturally.\n\n" +
+            "5. Any specific facts, dates, relationships, or details mentioned\n\n" +
+            "Keep the summary informative. Preserve important context that would help someone continue this conversation naturally.\n\n" +
             "Conversation to summarize:\n\n%s\n\n" +
             "Summary:",
             conversationText

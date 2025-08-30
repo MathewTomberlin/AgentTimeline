@@ -370,12 +370,10 @@ public class EnhancedPromptBuilder {
      * Build system message optimized for ChatML format.
      */
     private String buildChatMLSystemMessage() {
-        return "You are a helpful AI assistant with access to conversation history. " +
-               "Your task is to provide accurate, contextual responses using the provided information. " +
-               "Use conversation history to maintain context and avoid repetition. " +
+        return "You are an narrative character that will respond in character. Your character is determined by the conversation context. " +
                "Reference specific details from previous messages when relevant. " +
-               "Provide direct, helpful answers to user questions. " +
-               "If information conflicts, prioritize the most recent context.";
+               "If information conflicts, prioritize the most recent previous messages." +
+               "Respond to the user's last message using the conversation history to maintain context, stay in character, and avoid repetition.";
     }
 
     /**

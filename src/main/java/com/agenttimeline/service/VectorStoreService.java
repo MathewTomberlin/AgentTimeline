@@ -8,7 +8,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.IntStream;
 
 @Slf4j
@@ -162,22 +165,8 @@ public class VectorStoreService {
                 return List.of();
             }
 
-            // Debug: Check first chunk
-            if (!sessionChunks.isEmpty()) {
-                MessageChunkEmbedding firstChunk = sessionChunks.get(0);
-                log.debug("First chunk - ID: {}, MessageID: {}, Text length: {}, EmbeddingVectorJson length: {}",
-                    firstChunk.getId(),
-                    firstChunk.getMessageId(),
-                    firstChunk.getChunkText() != null ? firstChunk.getChunkText().length() : 0,
-                    firstChunk.getEmbeddingVectorJson() != null ? firstChunk.getEmbeddingVectorJson().length() : 0);
-
-                double[] embedding = firstChunk.getEmbeddingVector();
-                log.debug("First chunk embedding vector: {} (length: {})",
-                    embedding != null ? "present" : "null",
-                    embedding != null ? embedding.length : 0);
-            }
-
-            List<SimilarityScore> similarityScores = sessionChunks.stream()
+            // Use enhanced relevance-based retrieval
+            List<RelevanceScore> relevanceScores = sessionChunks.stream()
                 .filter(chunk -> {
                     double[] embedding = chunk.getEmbeddingVector();
                     boolean hasEmbedding = embedding != null && embedding.length > 0;
@@ -187,21 +176,26 @@ public class VectorStoreService {
                     return hasEmbedding;
                 })
                 .map(chunk -> {
-                    double similarity = cosineSimilarity(queryEmbedding, chunk.getEmbeddingVector());
-                    log.debug("Chunk {} similarity: {} (text: '{}')", chunk.getId(), similarity,
+                    double semanticSimilarity = cosineSimilarity(queryEmbedding, chunk.getEmbeddingVector());
+                    double contentRelevance = calculateContentRelevance(query, chunk.getChunkText());
+                    double finalScore = calculateFinalRelevanceScore(semanticSimilarity, contentRelevance, chunk);
+
+                    log.debug("Chunk {} - semantic: {:.3f}, content: {:.3f}, final: {:.3f} (text: '{}')",
+                        chunk.getId(), semanticSimilarity, contentRelevance, finalScore,
                         chunk.getChunkText() != null ? chunk.getChunkText().substring(0, Math.min(30, chunk.getChunkText().length())) : "null");
-                    return new SimilarityScore(chunk, similarity);
+
+                    return new RelevanceScore(chunk, semanticSimilarity, contentRelevance, finalScore);
                 })
-                .sorted((a, b) -> Double.compare(b.similarity, a.similarity))
-                .limit(limit)
+                .sorted((a, b) -> Double.compare(b.finalScore, a.finalScore))
+                .limit(Math.max(limit * 2, 10)) // Get more candidates for better selection
                 .toList();
 
-            List<MessageChunkEmbedding> similarChunks = similarityScores.stream()
-                .map(score -> score.chunk)
-                .toList();
+            // Select top chunks with diversity in mind
+            List<MessageChunkEmbedding> selectedChunks = selectDiverseChunks(relevanceScores, limit);
 
-            log.debug("Found {} similar chunks for query in session {}", similarChunks.size(), sessionId);
-            return similarChunks;
+            log.debug("Selected {} diverse chunks for query in session {} (from {} candidates)",
+                selectedChunks.size(), sessionId, relevanceScores.size());
+            return selectedChunks;
 
         } catch (Exception e) {
             log.error("Error finding similar chunks: {}", e.getMessage(), e);
@@ -426,7 +420,123 @@ public class VectorStoreService {
 
 
     /**
+     * Calculate content relevance score based on query type and chunk content
+     */
+    private double calculateContentRelevance(String query, String chunkText) {
+        if (chunkText == null || chunkText.trim().isEmpty()) {
+            return 0.0;
+        }
+
+        String lowerQuery = query.toLowerCase().trim();
+        String lowerChunk = chunkText.toLowerCase().trim();
+
+        double relevanceScore = 0.0;
+
+        // Question detection patterns
+        boolean isQuestion = lowerQuery.matches(".*\\b(what|who|where|when|why|how|which|whose)\\b.*") ||
+                            lowerQuery.matches(".*\\?$");
+
+        if (isQuestion) {
+            // For questions, prioritize chunks that contain answers/facts over other questions
+            if (lowerChunk.contains("my name is") || lowerChunk.contains("i'm") ||
+                lowerChunk.contains("i am") || lowerChunk.contains("i live") ||
+                lowerChunk.contains("i work") || lowerChunk.contains("i'm from")) {
+                relevanceScore += 0.8; // High boost for factual statements
+            } else if (lowerChunk.matches(".*\\b(what|who|where|when|why|how)\\b.*")) {
+                relevanceScore -= 0.3; // Penalty for other questions
+            }
+
+            // Specific question-answer matching
+            if (lowerQuery.contains("name") && (lowerChunk.contains("name is") || lowerChunk.contains("called"))) {
+                relevanceScore += 0.6;
+            }
+            if (lowerQuery.contains("from") && (lowerChunk.contains("from") || lowerChunk.contains("live"))) {
+                relevanceScore += 0.6;
+            }
+            if (lowerQuery.contains("work") && (lowerChunk.contains("work") || lowerChunk.contains("job"))) {
+                relevanceScore += 0.6;
+            }
+        } else {
+            // For statements, boost semantically similar content
+            relevanceScore += 0.2;
+        }
+
+        // Boost chunks with personal information
+        if (lowerChunk.matches(".*\\b(i|my|me)\\b.*")) {
+            relevanceScore += 0.1;
+        }
+
+        // Penalize very short or generic chunks
+        if (lowerChunk.split("\\s+").length < 3) {
+            relevanceScore -= 0.2;
+        }
+
+        return Math.max(0.0, Math.min(1.0, relevanceScore));
+    }
+
+    /**
+     * Calculate final relevance score combining semantic similarity and content relevance
+     */
+    private double calculateFinalRelevanceScore(double semanticSimilarity, double contentRelevance, MessageChunkEmbedding chunk) {
+        // Weight factors: 70% semantic similarity, 30% content relevance
+        double weightedScore = (semanticSimilarity * 0.7) + (contentRelevance * 0.3);
+
+        // Small recency boost (based on chunk index within message)
+        // More recent chunks within a message get slight preference
+        double recencyBoost = Math.min(0.05, chunk.getChunkIndex() * 0.01);
+
+        return weightedScore + recencyBoost;
+    }
+
+    /**
+     * Select diverse chunks to avoid redundancy while maintaining relevance
+     */
+    private List<MessageChunkEmbedding> selectDiverseChunks(List<RelevanceScore> relevanceScores, int limit) {
+        if (relevanceScores.size() <= limit) {
+            return relevanceScores.stream()
+                .map(score -> score.chunk)
+                .toList();
+        }
+
+        List<MessageChunkEmbedding> selected = new ArrayList<>();
+        Set<String> selectedMessageIds = new HashSet<>();
+
+        for (RelevanceScore score : relevanceScores) {
+            // Skip if we already have a chunk from this message (to ensure diversity)
+            if (selectedMessageIds.contains(score.chunk.getMessageId())) {
+                continue;
+            }
+
+            selected.add(score.chunk);
+            selectedMessageIds.add(score.chunk.getMessageId());
+
+            if (selected.size() >= limit) {
+                break;
+            }
+        }
+
+        // If we still don't have enough chunks, fill with remaining high-scoring ones
+        if (selected.size() < limit) {
+            for (RelevanceScore score : relevanceScores) {
+                if (!selected.contains(score.chunk)) {
+                    selected.add(score.chunk);
+                    if (selected.size() >= limit) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        return selected;
+    }
+
+    /**
      * Helper record for similarity scoring
      */
     private record SimilarityScore(MessageChunkEmbedding chunk, double similarity) {}
+
+    /**
+     * Enhanced relevance scoring record
+     */
+    private record RelevanceScore(MessageChunkEmbedding chunk, double semanticSimilarity, double contentRelevance, double finalScore) {}
 }
